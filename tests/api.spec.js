@@ -55,22 +55,6 @@ const app = require('../api/index.js'); // Assuming this line in api/index.js: m
 // The server management part (beforeAll/afterAll) might need adjustments based on how `app` is actually obtained and managed.
 
 describe('/api/qrcode endpoint integration tests', () => {
-  let server; // To hold the server instance for manual start/stop if needed.
-
-  // beforeAll(() => {
-  //   // If app.listen is conditional in api/index.js, we'd start the server here.
-  //   // server = app.listen(0); // Start on a random available port
-  // });
-
-  // afterAll((done) => {
-  //   // And close it here
-  //   // if (server) {
-  //   //   server.close(done);
-  //   // } else {
-  //   //   done();
-  //   // }
-  // });
-
   // Test Case 1: Basic PNG generation
   it('should return a PNG image by default', async () => {
     const response = await request(app)
@@ -184,5 +168,77 @@ describe('/api/qrcode endpoint integration tests', () => {
     expect(response.status).toBe(500);
     expect(response.headers['content-type']).toMatch(/application\/json/);
     expect(response.body).toEqual({ error: 'Unsupported output format for framed QR code' });
+  });
+});
+
+// Sample data for /api/scan tests
+const qrBase64HelloWorld = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAAAAklEQVR4AewaftIAAAIASURBVO3BQY4cQQgEQN3/pU+ChAUnNAMJnp2Z3b3/A9YtWLBgwYIFCxb/CWvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBUvWrFm3YsGCBQsWLFhEuQQYqgKeTjGgVwAAAABJRU5ErkJggg==";
+const nonQrBase64 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+
+describe('/api/scan endpoint integration tests', () => {
+  // Test Case 1: Successful scan from Base64
+  it('should successfully scan a QR code from a Base64 string', async () => {
+    const response = await request(app)
+      .post('/api/scan')
+      .send({ base64Image: qrBase64HelloWorld });
+    expect(response.status).toBe(200);
+    expect(response.headers['content-type']).toMatch(/application\/json/);
+    expect(response.body).toEqual({ text: 'Hello, World!', format: 'QR_CODE' });
+  });
+
+  // Test Case 2: Scan failure for non-QR image (Base64)
+  it('should return 404 for a non-QR image Base64 string', async () => {
+    const response = await request(app)
+      .post('/api/scan')
+      .send({ base64Image: nonQrBase64 });
+    expect(response.status).toBe(404);
+    expect(response.headers['content-type']).toMatch(/application\/json/);
+    expect(response.body).toEqual({ error: "No QR code or barcode found in the image." });
+  });
+
+  // Test Case 3: Missing image input
+  it('should return 400 if no image input is provided', async () => {
+    const response = await request(app)
+      .post('/api/scan')
+      .send({});
+    expect(response.status).toBe(400);
+    expect(response.headers['content-type']).toMatch(/application\/json/);
+    expect(response.body).toEqual({ error: "Missing image input. Provide either 'base64Image' or 'imageUrl'." });
+  });
+
+  // Test Case 4: Invalid Base64 string
+  it('should return 400 for an invalid Base64 string', async () => {
+    const response = await request(app)
+      .post('/api/scan')
+      .send({ base64Image: "not-a-base64-string" });
+    expect(response.status).toBe(400);
+    expect(response.headers['content-type']).toMatch(/application\/json/);
+    // The actual error message includes "Invalid base64Image format. Must be a data URI..."
+    // For simplicity, checking for the property and a partial match might be better if the exact message is too long or subject to minor changes.
+    expect(response.body).toHaveProperty('error');
+    expect(response.body.error).toContain("Invalid base64Image format.");
+  });
+  
+  // Test Case 5: Scan from invalid/inaccessible image URL
+  it('should return 400 for an invalid or inaccessible image URL', async () => {
+    const response = await request(app)
+      .post('/api/scan')
+      .send({ imageUrl: "http://localhost:12345/nonexistent.png" }); // Use a port that's unlikely to be in use
+    expect(response.status).toBe(400);
+    expect(response.headers['content-type']).toMatch(/application\/json/);
+    // The error message can vary based on the exact fetch failure (e.g., DNS error, connection refused)
+    // So, we check for a property and a general idea of the error.
+    expect(response.body).toHaveProperty('error');
+    expect(response.body.error).toMatch(/Invalid or inaccessible imageUrl|Failed to fetch image from URL/);
+  });
+
+  // Test Case 6: Both base64Image and imageUrl provided
+  it('should return 400 if both base64Image and imageUrl are provided', async () => {
+    const response = await request(app)
+      .post('/api/scan')
+      .send({ base64Image: qrBase64HelloWorld, imageUrl: "http://example.com/image.png" });
+    expect(response.status).toBe(400);
+    expect(response.headers['content-type']).toMatch(/application\/json/);
+    expect(response.body).toEqual({ error: "Provide either 'base64Image' or 'imageUrl', not both." });
   });
 });

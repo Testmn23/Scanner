@@ -4,6 +4,7 @@ const { QRCodeStyling } = require('qr-code-styling');
 const nodeCanvas = require('canvas');
 const { JSDOM } = require('jsdom');
 const sharp = require('sharp');
+const { MultiFormatReader, BarcodeFormat, DecodeHintType, RGBLuminanceSource, BinaryBitmap, HybridBinarizer, NotFoundException } = require('@zxing/library');
 
 // Helper function to parse pixel values (e.g., '16px' -> 16)
 function parsePixels(value, defaultValue = 0) {
@@ -121,7 +122,9 @@ const app = express();
 const port = process.env.PORT || 8080; // Define port here for use in the listen block
 
 // Middleware to parse JSON bodies
-app.use(express.json());
+// Increased limit for base64 image uploads
+app.use(express.json({ limit: '10mb' })); 
+
 
 // Serve static files from the 'dist' directory
 app.use(express.static(path.join(__dirname, '../dist')));
@@ -243,6 +246,89 @@ app.post('/api/qrcode', async (req, res) => {
     res.status(500).json({ error: 'Failed to process QR code request', details: error.message });
   }
 });
+
+// POST route for /api/scan
+app.post('/api/scan', async (req, res) => {
+  try {
+    const { base64Image, imageUrl } = req.body;
+    let imageBuffer;
+
+    if (base64Image && imageUrl) {
+      return res.status(400).json({ error: "Provide either 'base64Image' or 'imageUrl', not both." });
+    }
+
+    if (base64Image) {
+      if (!base64Image.startsWith('data:image/') || !base64Image.includes(';base64,')) {
+        return res.status(400).json({ error: "Invalid base64Image format. Must be a data URI (e.g., data:image/png;base64,...)." });
+      }
+      const base64Data = base64Image.split(';base64,').pop();
+      if (!base64Data) { // Handle cases where split might fail or pop returns undefined
+          return res.status(400).json({ error: "Invalid base64Image format. Could not extract base64 data." });
+      }
+      imageBuffer = Buffer.from(base64Data, 'base64');
+    } else if (imageUrl) {
+      try {
+        const response = await fetch(imageUrl);
+        if (!response.ok) {
+          return res.status(400).json({ error: `Failed to fetch image from URL. Status: ${response.status}` });
+        }
+        imageBuffer = Buffer.from(await response.arrayBuffer());
+      } catch (fetchError) {
+        console.error('Fetch error for imageUrl:', fetchError);
+        return res.status(400).json({ error: "Invalid or inaccessible imageUrl." });
+      }
+    } else {
+      return res.status(400).json({ error: "Missing image input. Provide either 'base64Image' or 'imageUrl'." });
+    }
+
+    if (!imageBuffer || imageBuffer.length === 0) {
+        return res.status(400).json({ error: "Image data is empty or invalid." });
+    }
+    
+    const image = sharp(imageBuffer);
+    const metadata = await image.metadata();
+    
+    // Ensure we have RGB/RGBA data for ZXing
+    // Sharp's .raw() typically gives RGB or RGBA.
+    // If it's just one channel (grayscale), ensure it's expanded or compatible.
+    // For RGBLuminanceSource, it expects data in Uint8ClampedArray of R,G,B,A or R,G,B.
+    // If metadata.channels is 1, we might need to convert to grayscale first, then raw.
+    // Or let sharp handle it: .ensureAlpha() or .greyscale().raw() might be options.
+    // For now, assume sharp provides compatible raw data.
+    const rawPixelData = await image.raw().toBuffer(); // This should be Uint8Array / Buffer
+
+    const hints = new Map();
+    const formats = [BarcodeFormat.QR_CODE, BarcodeFormat.DATA_MATRIX, BarcodeFormat.AZTEC, BarcodeFormat.PDF_417, BarcodeFormat.MAXICODE, BarcodeFormat.UPC_A, BarcodeFormat.UPC_E, BarcodeFormat.EAN_8, BarcodeFormat.EAN_13, BarcodeFormat.CODE_39, BarcodeFormat.CODE_128, BarcodeFormat.ITF ]; // Add more formats if needed
+    hints.set(DecodeHintType.POSSIBLE_FORMATS, formats);
+    hints.set(DecodeHintType.TRY_HARDER, true); // Ask Zxing to try harder
+
+    const reader = new MultiFormatReader();
+    reader.setHints(hints);
+
+    // RGBLuminanceSource expects Uint8ClampedArray. Buffer from sharp is Uint8Array.
+    // They are compatible for construction.
+    const luminanceSource = new RGBLuminanceSource(rawPixelData, metadata.width, metadata.height);
+    const binaryBitmap = new BinaryBitmap(new HybridBinarizer(luminanceSource));
+
+    try {
+      const result = reader.decode(binaryBitmap);
+      res.status(200).json({ text: result.getText(), format: BarcodeFormat[result.getBarcodeFormat()] });
+    } catch (decodeError) {
+      if (decodeError instanceof NotFoundException) {
+        console.log('ZXing NotFoundException:', decodeError.message);
+        return res.status(404).json({ error: "No QR code or barcode found in the image." }); // Changed to 404 for "not found"
+      } else {
+        console.error('ZXing decode error:', decodeError);
+        return res.status(500).json({ error: "Could not decode QR code or barcode from the provided image due to a processing error." });
+      }
+    }
+
+  } catch (error) {
+    console.error('Error in /api/scan:', error);
+    res.status(500).json({ error: "An unexpected server error occurred." });
+  }
+});
+
 
 // Export the app for testing
 module.exports = app;
