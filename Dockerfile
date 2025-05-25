@@ -1,8 +1,9 @@
 FROM node:lts-alpine
 
-RUN npm install -g http-server
+# http-server is no longer needed as we use Express.js
+# RUN npm install -g http-server 
 
-WORKDIR /src
+WORKDIR /app
 
 COPY package*.json ./
 
@@ -13,4 +14,6 @@ COPY . .
 RUN npm run build
 
 EXPOSE 8080
-CMD [ "http-server", "dist" ]
+
+# Run the Express server
+CMD [ "node", "api/index.js" ]
