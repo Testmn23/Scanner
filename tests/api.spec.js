@@ -143,31 +143,24 @@ describe('/api/qrcode endpoint integration tests', () => {
     expect(response.body).toEqual({ error: 'Missing required parameter: data' });
   });
 
-  // Test Case 8: Invalid outputFormat
-  // Based on current api/index.js, unsupported formats lead to 500, as sharp won't handle them.
-  // If "gif" is passed, and it's not svg, png, jpeg, or webp, it will fall into an error path.
-  // Framed: "Unsupported output format for framed QR code"
-  // Not framed: "Unsupported direct QR code conversion" or similar from sharp if initial is SVG
-  it('should return 500 for an invalid outputFormat like "gif"', async () => {
+  // Test Case 8: Invalid outputFormat (New: Expect 400 due to validation)
+  it('should return 400 for invalid outputFormat', async () => {
     const response = await request(app)
       .post('/api/qrcode')
-      .send({ data: 'test_invalid_format', outputFormat: 'gif' });
-    expect(response.status).toBe(500); // Or 400 if validation is added earlier
+      .send({ data: 'test_invalid_format', outputFormat: 'txt' });
+    expect(response.status).toBe(400);
     expect(response.headers['content-type']).toMatch(/application\/json/);
-    // The exact error message might vary depending on whether it's framed or not,
-    // and what the initial generation format was.
-    expect(response.body).toHaveProperty('error');
-    // Example check:
-    // expect(response.body.error).toMatch(/Unsupported output format|Unsupported direct QR code conversion/);
+    expect(response.body).toEqual({ error: "Unsupported outputFormat. Supported formats are: png, jpeg, jpg, svg, webp." });
   });
 
-  it('should return 500 for an invalid outputFormat like "gif" with frame', async () => {
+  // Test for invalid outputFormat with frame (should also be 400 now)
+  it('should return 400 for invalid outputFormat with frame', async () => {
     const response = await request(app)
       .post('/api/qrcode')
-      .send({ data: 'test_invalid_format_frame', outputFormat: 'gif', showFrame: true, frameText: 'GIF?' });
-    expect(response.status).toBe(500);
+      .send({ data: 'test_invalid_format_frame', outputFormat: 'txt', showFrame: true, frameText: 'TXT Frame?' });
+    expect(response.status).toBe(400);
     expect(response.headers['content-type']).toMatch(/application\/json/);
-    expect(response.body).toEqual({ error: 'Unsupported output format for framed QR code' });
+    expect(response.body).toEqual({ error: "Unsupported outputFormat. Supported formats are: png, jpeg, jpg, svg, webp." });
   });
 });
 

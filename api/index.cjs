@@ -46,24 +46,29 @@ async function generateFramedQrCodeSvg(qrData, qrOutputFormat, frameOptions) {
   const fontSize = parsePixels(style.fontSize);
 
   let qrElementXml = '';
+  // Consistent handling: always use <image> with base64 data URI for QR code embedding in frame
+  let base64QrImage;
+  let qrMimeType;
+
   if (qrOutputFormat === 'svg') {
     if (typeof qrData !== 'string') {
-        throw new Error('SVG QR data must be a string.');
+      throw new Error('SVG QR data must be a string for frame generation.');
     }
-    // For direct SVG embedding, remove existing width/height if they exist to allow scaling in the frame
-    // This is a simplified approach; a more robust SVG manipulation library might be better for complex SVGs
-    const nakedSvg = qrData.replace(/width="[^"]*"/, '').replace(/height="[^"]*"/, '');
-    qrElementXml = `<g transform="translate(${padding + borderWidth}, ${padding + borderWidth}) scale(${qrCodeWidth / parsePixels(qrData.match(/viewBox="0 0 (\d+) (\d+)"/)?.[1] || qrCodeWidth, qrCodeWidth)} ${qrCodeHeight / parsePixels(qrData.match(/viewBox="0 0 (\d+) (\d+)"/)?.[2] || qrCodeHeight, qrCodeHeight)})">${nakedSvg}</g>`;
+    base64QrImage = Buffer.from(qrData).toString('base64');
+    qrMimeType = 'image/svg+xml';
   } else if (['png', 'jpeg', 'webp'].includes(qrOutputFormat)) {
     if (!Buffer.isBuffer(qrData)) {
-        throw new Error('Raster QR data must be a Buffer.');
+      throw new Error('Raster QR data must be a Buffer for frame generation.');
     }
-    const base64Image = qrData.toString('base64');
-    const mimeType = `image/${qrOutputFormat === 'jpeg' ? 'jpeg' : qrOutputFormat}`;
-    qrElementXml = `<image xlink:href="data:${mimeType};base64,${base64Image}" x="${padding + borderWidth}" y="${padding + borderWidth}" width="${qrCodeWidth}" height="${qrCodeHeight}" />`;
+    base64QrImage = qrData.toString('base64');
+    qrMimeType = `image/${qrOutputFormat === 'jpeg' ? 'jpeg' : qrOutputFormat}`;
   } else {
     throw new Error(`Unsupported qrOutputFormat for frame generation: ${qrOutputFormat}`);
   }
+  
+  // This ensures qrElementXml is always an <image> tag.
+  // x, y, width, height attributes are applied to this <image> tag later.
+  qrElementXml = `<image xlink:href="data:${qrMimeType};base64,${base64QrImage}" width="${qrCodeWidth}" height="${qrCodeHeight}" />`;
 
   let textElementHeight = 0;
   if (frameText) {
@@ -87,29 +92,19 @@ async function generateFramedQrCodeSvg(qrData, qrOutputFormat, frameOptions) {
     }
   }
   
-  // Re-adjust QR element position based on text and its own Y offset
-  if (qrOutputFormat === 'svg') {
-     // The translation is now part of the <g> element for SVG content
-     const nakedSvg = qrData.replace(/width="[^"]*"/, '').replace(/height="[^"]*"/, '');
-     // Extract viewBox dimensions for scaling
-     const viewBoxMatch = qrData.match(/viewBox="0 0 (\d+) (\d+)"/);
-     const originalSvgWidth = viewBoxMatch ? parsePixels(viewBoxMatch[1], qrCodeWidth) : qrCodeWidth;
-     const originalSvgHeight = viewBoxMatch ? parsePixels(viewBoxMatch[2], qrCodeHeight) : qrCodeHeight;
-     const scaleX = qrCodeWidth / originalSvgWidth;
-     const scaleY = qrCodeHeight / originalSvgHeight;
-     qrElementXml = `<g transform="translate(${padding + borderWidth}, ${qrOffsetY}) scale(${scaleX} ${scaleY})">${nakedSvg}</g>`;
-
-  } else {
-     qrElementXml = `<image xlink:href="${qrElementXml.match(/href="([^"]+)"/)[1]}" x="${padding + borderWidth}" y="${qrOffsetY}" width="${qrCodeWidth}" height="${qrCodeHeight}" />`;
-  }
+  // Position the <image> element (qrElementXml already contains the <image> tag with data URI)
+  const positionedQrElement = `<image xlink:href="${qrElementXml.match(/href="([^"]+)"/)[1]}" x="${padding + borderWidth}" y="${qrOffsetY}" width="${qrCodeWidth}" height="${qrCodeHeight}" />`;
 
   const svgParts = [
+    // Ensure xmlns:xlink is defined for xlink:href
     `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${totalWidth}" height="${totalHeight}">`,
-    `<rect x="0" y="0" width="${totalWidth}" height="${totalHeight}" fill="${style.backgroundColor}" stroke="${style.borderColor}" stroke-width="${style.borderWidth}" rx="${style.borderRadius}" ry="${style.borderRadius}" />`,
-    qrElementXml
+    // Frame rectangle: fill is set once from style.backgroundColor
+    `<rect x="0" y="0" width="${totalWidth}" height="${totalHeight}" fill="${style.backgroundColor}" stroke="${style.borderColor}" stroke-width="${borderWidth}" rx="${style.borderRadius}" ry="${style.borderRadius}" />`,
+    positionedQrElement
   ];
 
   if (frameText) {
+    // Frame text: fill is set once from style.textColor
     svgParts.push(`<text x="${textX}" y="${textY}" font-family="${style.fontFamily}" font-size="${style.fontSize}" fill="${style.textColor}" text-anchor="${style.textAlign === 'center' ? 'middle' : (style.textAlign === 'right' ? 'end' : 'start')}" dominant-baseline="${style.textBaseline === 'middle' ? 'central' : style.textBaseline}">${frameText}</text>`);
   }
 
@@ -154,12 +149,27 @@ app.post('/api/qrcode', async (req, res) => {
     return res.status(400).json({ error: 'Missing required parameter: data' });
   }
 
-  const qrStylingOptions = {
+  // Validate outputFormat
+  const supportedOutputFormats = ['png', 'jpeg', 'jpg', 'svg', 'webp'];
+  if (!supportedOutputFormats.includes(outputFormat.toLowerCase())) {
+    return res.status(400).json({ error: "Unsupported outputFormat. Supported formats are: png, jpeg, jpg, svg, webp." });
+  }
+
+  let finalQrStylingOptions = { // Use a new variable for QRCodeStyling options
     data, width, height, margin, image,
     dotsOptions, backgroundOptions, cornersSquareOptions, cornersDotOptions, imageOptions, qrOptions,
   };
 
-  // Determine the format for initial QR generation. If framing, SVG is often best for quality.
+  if (showFrame) {
+    // Ensure QR code itself has a transparent background if it's going on a frame
+    finalQrStylingOptions.backgroundOptions = {
+      ...(finalQrStylingOptions.backgroundOptions || {}), // Spread existing user-defined backgroundOptions
+      color: 'transparent'
+    };
+  }
+
+  // Determine the format for initial QR generation.
+  // If framing, initial generation as SVG is good for quality before embedding in the frame SVG.
   // If not framing, generate directly in the target format if it's SVG, otherwise PNG for raster.
   const initialGenerateFormat = showFrame ? 'svg' : (outputFormat === 'svg' ? 'svg' : 'png');
   console.log(`Initial QR generation format: ${initialGenerateFormat}, Target output format: ${outputFormat}`);
@@ -167,14 +177,15 @@ app.post('/api/qrcode', async (req, res) => {
   const qrCode = new QRCodeStyling({
     nodeCanvas,
     jsdom: JSDOM,
-    ...qrStylingOptions,
+    ...finalQrStylingOptions, // Use the potentially modified options
     // Force width/height for QRCodeStyling instance, margin will be applied by the library
-    width: qrStylingOptions.width, 
-    height: qrStylingOptions.height,
+    width: finalQrStylingOptions.width, 
+    height: finalQrStylingOptions.height,
   });
 
   try {
-    let generatedQrData = await qrCode.getRawData(initialGenerateFormat);
+    // Generate QR data (this will be SVG if showFrame is true, due to initialGenerateFormat logic)
+    let generatedQrData = await qrCode.getRawData(initialGenerateFormat); 
     let finalBuffer;
     let contentType;
     
@@ -194,17 +205,24 @@ app.post('/api/qrcode', async (req, res) => {
       if (outputFormat === 'svg') {
         finalBuffer = Buffer.from(compositeSvgString);
         contentType = 'image/svg+xml';
-      } else if (outputFormat === 'png') {
-        finalBuffer = await sharp(Buffer.from(compositeSvgString)).png().toBuffer();
-        contentType = 'image/png';
-      } else if (outputFormat === 'jpeg' || outputFormat === 'jpg') {
-        finalBuffer = await sharp(Buffer.from(compositeSvgString)).jpeg().toBuffer();
-        contentType = 'image/jpeg';
-      } else if (outputFormat === 'webp') {
-        finalBuffer = await sharp(Buffer.from(compositeSvgString)).webp().toBuffer();
-        contentType = 'image/webp';
-      } else {
-        return res.status(500).json({ error: 'Unsupported output format for framed QR code' });
+      } else { // PNG, JPEG, WEBP conversion from SVG frame
+        try {
+          if (outputFormat === 'png') {
+            finalBuffer = await sharp(Buffer.from(compositeSvgString)).png().toBuffer();
+            contentType = 'image/png';
+          } else if (outputFormat === 'jpeg' || outputFormat === 'jpg') {
+            finalBuffer = await sharp(Buffer.from(compositeSvgString)).jpeg().toBuffer();
+            contentType = 'image/jpeg';
+          } else if (outputFormat === 'webp') {
+            finalBuffer = await sharp(Buffer.from(compositeSvgString)).webp().toBuffer();
+            contentType = 'image/webp';
+          }
+          // The 'else' for unsupported format is already handled by the validation at the beginning.
+        } catch (sharpError) {
+          console.error("Sharp conversion error (framed SVG to raster):", sharpError);
+          res.status(500).json({ error: "Image processing failed for the requested format.", details: sharpError.message });
+          return;
+        }
       }
     } else { // No frame
       console.log('No frame. Initial format:', initialGenerateFormat, 'Target format:', outputFormat);
@@ -212,38 +230,52 @@ app.post('/api/qrcode', async (req, res) => {
         finalBuffer = Buffer.isBuffer(generatedQrData) ? generatedQrData : Buffer.from(generatedQrData);
         contentType = initialGenerateFormat === 'svg' ? 'image/svg+xml' : `image/${initialGenerateFormat}`;
       } else { // Conversion needed for non-framed QR
-        if (initialGenerateFormat === 'svg' && outputFormat === 'png') {
-          finalBuffer = await sharp(Buffer.from(generatedQrData)).png().toBuffer();
-          contentType = 'image/png';
-        } else if (initialGenerateFormat === 'svg' && (outputFormat === 'jpeg' || outputFormat === 'jpg')) {
-          finalBuffer = await sharp(Buffer.from(generatedQrData)).jpeg().toBuffer();
-          contentType = 'image/jpeg';
-        } else if (initialGenerateFormat === 'svg' && outputFormat === 'webp') {
-          finalBuffer = await sharp(Buffer.from(generatedQrData)).webp().toBuffer();
-          contentType = 'image/webp';
-        } 
-        // If initial was PNG (because target was raster and no frame) and target is different raster
-        else if (initialGenerateFormat === 'png' && (outputFormat === 'jpeg' || outputFormat === 'jpg')) {
+        try {
+          if (initialGenerateFormat === 'svg' && outputFormat === 'png') {
+            finalBuffer = await sharp(Buffer.from(generatedQrData)).png().toBuffer();
+            contentType = 'image/png';
+          } else if (initialGenerateFormat === 'svg' && (outputFormat === 'jpeg' || outputFormat === 'jpg')) {
+            finalBuffer = await sharp(Buffer.from(generatedQrData)).jpeg().toBuffer();
+            contentType = 'image/jpeg';
+          } else if (initialGenerateFormat === 'svg' && outputFormat === 'webp') {
+            finalBuffer = await sharp(Buffer.from(generatedQrData)).webp().toBuffer();
+            contentType = 'image/webp';
+          } else if (initialGenerateFormat === 'png' && (outputFormat === 'jpeg' || outputFormat === 'jpg')) {
             finalBuffer = await sharp(generatedQrData).jpeg().toBuffer();
             contentType = 'image/jpeg';
-        } else if (initialGenerateFormat === 'png' && outputFormat === 'webp') {
+          } else if (initialGenerateFormat === 'png' && outputFormat === 'webp') {
             finalBuffer = await sharp(generatedQrData).webp().toBuffer();
             contentType = 'image/webp';
-        }
-        else {
-          // This case should ideally be caught by initialGenerateFormat logic or earlier validation
-          console.error(`Unsupported direct conversion: from ${initialGenerateFormat} to ${outputFormat}`);
-          return res.status(500).json({ error: 'Unsupported direct QR code conversion' });
+          }
+          // The 'else' for unsupported direct conversion is effectively handled by the initial outputFormat validation.
+        } catch (sharpError) {
+          console.error("Sharp conversion error (direct, non-framed):", sharpError);
+          res.status(500).json({ error: "Image processing failed for the requested format.", details: sharpError.message });
+          return;
         }
       }
+    }
+
+    // If finalBuffer or contentType is not set, it means an error should have been caught and returned.
+    // However, as a safeguard:
+    if (!finalBuffer || !contentType) {
+        console.error('Error: finalBuffer or contentType not set before sending response. This indicates a logic flaw.');
+        // Check if response has already been sent by a more specific error handler
+        if (!res.headersSent) {
+            res.status(500).json({ error: "Internal server error: Image processing failed unexpectedly." });
+        }
+        return;
     }
 
     res.setHeader('Content-Type', contentType);
     res.send(finalBuffer);
 
-  } catch (error) {
-    console.error('Failed to process QR code request:', error);
-    res.status(500).json({ error: 'Failed to process QR code request', details: error.message });
+  } catch (error) { // This outer catch handles errors from qrCode.getRawData(), generateFramedQrCodeSvg (if not caught internally), or other unexpected errors.
+    console.error('Failed to process QR code request (outer catch):', error);
+    // Avoid sending response if headers already sent (e.g. by a specific sharp error handler)
+    if (!res.headersSent) {
+        res.status(500).json({ error: 'Failed to process QR code request', details: error.message });
+    }
   }
 });
 
