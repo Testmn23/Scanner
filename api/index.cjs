@@ -267,6 +267,10 @@ app.post('/api/qrcode', async (req, res) => {
         return;
     }
 
+    console.log(`Preparing to send response: Content-Type='${contentType}', Buffer type='${typeof finalBuffer}', Buffer length='${finalBuffer ? finalBuffer.length : 'undefined'}'`);
+    if (contentType === 'image/svg+xml' && finalBuffer) {
+        console.log(`SVG Content (first 100 chars): ${finalBuffer.toString('utf8').substring(0, 100)}`);
+    }
     res.setHeader('Content-Type', contentType);
     res.send(finalBuffer);
 

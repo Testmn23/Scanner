@@ -49,9 +49,11 @@ After starting the container, you can access:
 *   **Backend API:**
     The API is served from the same origin, under the `/api` path.
     *   **Base URL:** `http://localhost:8080/api`
-    *   **Example Endpoints:**
+    *   **Example API Endpoints:**
         *   QR Code Generation: `POST http://localhost:8080/api/qrcode`
+           (To save image output with `curl`, use the `-o <filename>` flag. For example: `curl -X POST -H "Content-Type: application/json" -d '{"data":"Test QR"}' http://localhost:8080/api/qrcode -o myqrcode.png`)
         *   QR Code Scanning: `POST http://localhost:8080/api/scan`
+           (This endpoint returns JSON, which will display directly in the terminal with `curl`.)
 
     Refer to the `apidoc.md` file for detailed information on API usage, parameters, and examples.
 

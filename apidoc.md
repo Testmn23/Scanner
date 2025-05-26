@@ -70,7 +70,7 @@ This API allows for dynamic generation of customizable QR codes and scanning of 
       -d '{
             "data": "https://example.com"
           }' \
-      --output qrcode.png
+      -o qrcode.png
     ```
 *   **Example Request (Styled SVG with Frame):**
     ```bash
@@ -97,11 +97,17 @@ This API allows for dynamic generation of customizable QR codes and scanning of 
               "fontSize": "20px"
             }
           }' \
-      --output framed_qrcode.svg
+      -o framed_qrcode.svg
     ```
 *   **Response:**
     *   Success: The raw image data (PNG, JPEG, SVG, or WEBP). `Content-Type` will match the image format.
     *   Error: JSON object with an `error` message. (See Error Handling section).
+    
+    **Note on `curl` Usage for Images:**
+    When using `curl` to fetch image formats (PNG, JPEG, WEBP, SVG), the raw image data will not display correctly in your terminal for binary formats. To save the image to a file, use the `-o <filename>` flag, for example:
+    `curl -X POST ... -o qrcode.png`
+    For SVG, `curl` will print the XML content to the terminal. You can save this by redirecting the output:
+    `curl -X POST ... > qrcode.svg` or by using `-o qrcode.svg`.
 
 ### 3.2. QR Code / Barcode Scanning
 
