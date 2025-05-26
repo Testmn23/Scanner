@@ -22,4 +22,4 @@ RUN npm run build
 EXPOSE 8080
 
 # Run the Express server
-CMD [ "node", "api/index.js" ]
+CMD [ "node", "api/index.cjs" ]

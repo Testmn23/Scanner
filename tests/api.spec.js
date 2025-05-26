@@ -44,7 +44,7 @@ import request from 'supertest';
 
 // Let's try to require it, as it's a .js file likely treated as CommonJS by Node.
 // Vitest environment might allow this.
-const app = require('../api/index.js'); // Assuming this line in api/index.js: module.exports = app; (after removing app.listen or guarding it)
+const app = require('../api/index.cjs'); // Assuming this line in api/index.js: module.exports = app; (after removing app.listen or guarding it)
 
 // If `api/index.js` is not modified to properly export `app` for testing
 // (i.e., without calling `app.listen()` unconditionally), these tests will
