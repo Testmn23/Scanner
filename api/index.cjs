@@ -1,6 +1,6 @@
 const express = require('express');
 const path = require('path');
-const { QRCodeStyling } = require('qr-code-styling');
+const { QRCodeStyling } = require("qr-code-styling/lib/qr-code-styling.common.js");
 const nodeCanvas = require('canvas');
 const { JSDOM } = require('jsdom');
 const sharp = require('sharp');
@@ -124,8 +124,34 @@ app.use(express.json({ limit: '10mb' }));
 // Serve static files from the 'dist' directory
 app.use(express.static(path.join(__dirname, '../dist')));
 
+// Basic request logging middleware for API routes
+app.use('/api', (req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} - Request received`);
+  next();
+});
+
+// GET handler for the root /api path
+app.get('/api', (req, res) => {
+  console.log(`[${new Date().toISOString()}] GET /api - Route hit`);
+  res.status(200).json({ message: "Mini QR API is running." });
+});
+
+// GET handler for /api/qrcode path
+app.get('/api/qrcode', (req, res) => {
+  console.log(`[${new Date().toISOString()}] GET /api/qrcode - Route hit`);
+  res.status(200).json({ message: "GET request received for /api/qrcode. API is alive. Please use POST to generate QR codes." });
+});
+
+// GET handler for /api/scan path
+app.get('/api/scan', (req, res) => {
+  console.log(`[${new Date().toISOString()}] GET /api/scan - Route hit`);
+  res.status(200).json({ message: "GET request received for /api/scan. API is alive. Please use POST to scan QR codes." });
+});
+
 // POST route for /api/qrcode
 app.post('/api/qrcode', async (req, res) => {
+  // Temporarily comment out parameter destructuring for basic PNG isolation
+  /*
   const {
     data,
     width = 300,
@@ -154,25 +180,37 @@ app.post('/api/qrcode', async (req, res) => {
   if (!supportedOutputFormats.includes(outputFormat.toLowerCase())) {
     return res.status(400).json({ error: "Unsupported outputFormat. Supported formats are: png, jpeg, jpg, svg, webp." });
   }
+  */
 
-  let finalQrStylingOptions = { // Use a new variable for QRCodeStyling options
-    data, width, height, margin, image,
-    dotsOptions, backgroundOptions, cornersSquareOptions, cornersDotOptions, imageOptions, qrOptions,
+  // Hardcode minimal options for basic PNG
+  const options = {
+      data: "https://example.com", // Simple test data
+      width: 300, // Default width
+      height: 300, // Default height
+      outputFormat: 'png', // Force PNG
+      qrOptions: { errorCorrectionLevel: 'Q' } // Keep default QR options
   };
+  console.log("Forcing basic PNG generation with options:", options);
 
-  if (showFrame) {
-    // Ensure QR code itself has a transparent background if it's going on a frame
-    finalQrStylingOptions.backgroundOptions = {
-      ...(finalQrStylingOptions.backgroundOptions || {}), // Spread existing user-defined backgroundOptions
-      color: 'transparent'
-    };
-  }
+  // Bypass showFrame logic for this test
+  const showFrame = false; 
+  const outputFormat = 'png'; // Force outputFormat to png for this test
 
-  // Determine the format for initial QR generation.
-  // If framing, initial generation as SVG is good for quality before embedding in the frame SVG.
-  // If not framing, generate directly in the target format if it's SVG, otherwise PNG for raster.
-  const initialGenerateFormat = showFrame ? 'svg' : (outputFormat === 'svg' ? 'svg' : 'png');
-  console.log(`Initial QR generation format: ${initialGenerateFormat}, Target output format: ${outputFormat}`);
+  let finalQrStylingOptions = {
+      data: options.data,
+      width: options.width,
+      height: options.height,
+      qrOptions: options.qrOptions,
+      // Ensure background is opaque for basic PNG
+      backgroundOptions: { color: '#ffffff' }, 
+      dotsOptions: { color: '#000000' } // Basic dots
+      // No margin, image, other complex options for this isolation test
+  };
+  
+  // Force initial generation to PNG
+  const initialGenerateFormat = 'png'; 
+  console.log(`Initial QR generation format (forced): ${initialGenerateFormat}, Target output format (forced): ${outputFormat}`);
+
 
   const qrCode = new QRCodeStyling({
     nodeCanvas,
@@ -189,15 +227,13 @@ app.post('/api/qrcode', async (req, res) => {
     let finalBuffer;
     let contentType;
     
-    let compositeSvgString;
+    let compositeSvgString; // Will not be used due to showFrame = false
 
-    if (showFrame) {
+    if (showFrame) { // This block should be skipped due to showFrame = false
       const frameGenOptions = {
-        qrCodeWidth: width, // Use the user-specified width for the QR part of the frame
-        qrCodeHeight: height,
-        frameText,
-        frameTextPosition,
-        frameStyle
+        qrCodeWidth: options.width, 
+        qrCodeHeight: options.height,
+        // frameText, frameTextPosition, frameStyle // These would come from original req.body, but not relevant for this isolated test
       };
       compositeSvgString = await generateFramedQrCodeSvg(generatedQrData, initialGenerateFormat, frameGenOptions);
       console.log('Frame generated. Target format:', outputFormat);
@@ -224,12 +260,13 @@ app.post('/api/qrcode', async (req, res) => {
           return;
         }
       }
-    } else { // No frame
+    } else { // No frame - THIS PATH SHOULD BE TAKEN
       console.log('No frame. Initial format:', initialGenerateFormat, 'Target format:', outputFormat);
-      if (initialGenerateFormat === outputFormat) {
+      // Since initialGenerateFormat and outputFormat are both 'png', this condition should be true
+      if (initialGenerateFormat === outputFormat) { 
         finalBuffer = Buffer.isBuffer(generatedQrData) ? generatedQrData : Buffer.from(generatedQrData);
-        contentType = initialGenerateFormat === 'svg' ? 'image/svg+xml' : `image/${initialGenerateFormat}`;
-      } else { // Conversion needed for non-framed QR
+        contentType = `image/${initialGenerateFormat}`; // Should be 'image/png'
+      } else { // Conversion needed for non-framed QR - THIS BLOCK SHOULD BE SKIPPED
         try {
           if (initialGenerateFormat === 'svg' && outputFormat === 'png') {
             finalBuffer = await sharp(Buffer.from(generatedQrData)).png().toBuffer();
@@ -284,6 +321,7 @@ app.post('/api/qrcode', async (req, res) => {
 });
 
 // POST route for /api/scan
+// This needs to be after the GET handler for /api/scan to avoid path collision if GET was defined later.
 app.post('/api/scan', async (req, res) => {
   try {
     const { base64Image, imageUrl } = req.body;
