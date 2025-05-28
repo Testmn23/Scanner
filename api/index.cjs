@@ -1,3 +1,4 @@
+console.log("--- api/index.cjs script started ---");
 const express = require('express');
 const path = require('path');
 const { QRCodeStyling } = require("qr-code-styling/lib/qr-code-styling.common.js");
