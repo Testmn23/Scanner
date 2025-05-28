@@ -149,8 +149,7 @@ app.get('/api/scan', (req, res) => {
 
 // POST route for /api/qrcode
 app.post('/api/qrcode', async (req, res) => {
-  // Temporarily comment out parameter destructuring for basic PNG isolation
-  /*
+  // Restore dynamic parameter handling
   const {
     data,
     width = 300,
@@ -179,60 +178,50 @@ app.post('/api/qrcode', async (req, res) => {
   if (!supportedOutputFormats.includes(outputFormat.toLowerCase())) {
     return res.status(400).json({ error: "Unsupported outputFormat. Supported formats are: png, jpeg, jpg, svg, webp." });
   }
-  */
 
-  // Hardcode minimal options for basic PNG
-  const options = {
-      data: "https://example.com", // Simple test data
-      width: 300, // Default width
-      height: 300, // Default height
-      outputFormat: 'png', // Force PNG
-      qrOptions: { errorCorrectionLevel: 'Q' } // Keep default QR options
-  };
-  console.log("Forcing basic PNG generation with options:", options);
-
-  // Bypass showFrame logic for this test
-  const showFrame = false; 
-  const outputFormat = 'png'; // Force outputFormat to png for this test
-
+  // Construct finalQrStylingOptions from dynamic request parameters
   let finalQrStylingOptions = {
-      data: options.data,
-      width: options.width,
-      height: options.height,
-      qrOptions: options.qrOptions,
-      // Ensure background is opaque for basic PNG
-      backgroundOptions: { color: '#ffffff' }, 
-      dotsOptions: { color: '#000000' } // Basic dots
-      // No margin, image, other complex options for this isolation test
+    data, width, height, margin, image,
+    dotsOptions, backgroundOptions, cornersSquareOptions, cornersDotOptions, imageOptions, qrOptions,
   };
+
+  if (showFrame) {
+    // Ensure QR code itself has a transparent background if it's going on a frame
+    finalQrStylingOptions.backgroundOptions = {
+      ...(finalQrStylingOptions.backgroundOptions || {}), // Spread existing user-defined backgroundOptions
+      color: 'transparent'
+    };
+  }
   
-  // Force initial generation to PNG
-  const initialGenerateFormat = 'png'; 
-  console.log(`Initial QR generation format (forced): ${initialGenerateFormat}, Target output format (forced): ${outputFormat}`);
+  // Determine the format for initial QR generation based on dynamic parameters
+  const initialGenerateFormat = showFrame ? 'svg' : (outputFormat.toLowerCase() === 'svg' ? 'svg' : 'png');
+  console.log(`Initial QR generation format: ${initialGenerateFormat}, Target output format: ${outputFormat}`);
 
 
   const qrCode = new QRCodeStyling({
     nodeCanvas,
     jsdom: JSDOM,
-    ...finalQrStylingOptions, // Use the potentially modified options
+    ...finalQrStylingOptions, // Use the dynamically constructed options
     // Force width/height for QRCodeStyling instance, margin will be applied by the library
     width: finalQrStylingOptions.width, 
     height: finalQrStylingOptions.height,
   });
 
   try {
-    // Generate QR data (this will be SVG if showFrame is true, due to initialGenerateFormat logic)
+    // Generate QR data
     let generatedQrData = await qrCode.getRawData(initialGenerateFormat); 
     let finalBuffer;
     let contentType;
     
-    let compositeSvgString; // Will not be used due to showFrame = false
+    let compositeSvgString;
 
-    if (showFrame) { // This block should be skipped due to showFrame = false
+    if (showFrame) {
       const frameGenOptions = {
-        qrCodeWidth: options.width, 
-        qrCodeHeight: options.height,
-        // frameText, frameTextPosition, frameStyle // These would come from original req.body, but not relevant for this isolated test
+        qrCodeWidth: width, // Use width from req.body (or default)
+        qrCodeHeight: height, // Use height from req.body (or default)
+        frameText,
+        frameTextPosition,
+        frameStyle
       };
       compositeSvgString = await generateFramedQrCodeSvg(generatedQrData, initialGenerateFormat, frameGenOptions);
       console.log('Frame generated. Target format:', outputFormat);
