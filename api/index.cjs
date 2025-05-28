@@ -52,10 +52,17 @@ async function generateFramedQrCodeSvg(qrData, qrOutputFormat, frameOptions) {
   let qrMimeType;
 
   if (qrOutputFormat === 'svg') {
-    if (typeof qrData !== 'string') {
-      throw new Error('SVG QR data must be a string for frame generation.');
+    let svgString;
+    if (Buffer.isBuffer(qrData)) {
+      svgString = qrData.toString('utf8');
+    } else if (typeof qrData === 'string') {
+      // This case might not be strictly necessary if qrCode.getRawData('svg') always returns a Buffer in Node,
+      // but it's safer to handle it if a string could somehow be passed.
+      svgString = qrData;
+    } else {
+      throw new Error('SVG QR data received in generateFramedQrCodeSvg was neither a Buffer nor a string.');
     }
-    base64QrImage = Buffer.from(qrData).toString('base64');
+    base64QrImage = Buffer.from(svgString).toString('base64');
     qrMimeType = 'image/svg+xml';
   } else if (['png', 'jpeg', 'webp'].includes(qrOutputFormat)) {
     if (!Buffer.isBuffer(qrData)) {
