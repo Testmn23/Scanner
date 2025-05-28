@@ -116,19 +116,17 @@ async function generateFramedQrCodeSvg(qrData, qrOutputFormat, frameOptions) {
 const app = express();
 const port = process.env.PORT || 8080; // Define port here for use in the listen block
 
-// Middleware to parse JSON bodies
+// 1. General middleware like body parsers
 // Increased limit for base64 image uploads
 app.use(express.json({ limit: '10mb' })); 
 
-
-// Serve static files from the 'dist' directory
-app.use(express.static(path.join(__dirname, '../dist')));
-
-// Basic request logging middleware for API routes
+// 2. API request logging middleware
 app.use('/api', (req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} - Request received`);
   next();
 });
+
+// 3. All specific API route handlers
 
 // GET handler for the root /api path
 app.get('/api', (req, res) => {
@@ -403,6 +401,16 @@ app.post('/api/scan', async (req, res) => {
   }
 });
 
+// 4. Static file serving middleware
+// Serve static files from the 'dist' directory AFTER API routes
+app.use(express.static(path.join(__dirname, '../dist')));
+
+// 5. SPA Fallback Route
+// This should be placed AFTER all API routes and AFTER express.static
+app.get('*', (req, res) => {
+  console.log(`[${new Date().toISOString()}] GET ${req.originalUrl} - SPA Fallback: Serving index.html`);
+  res.sendFile(path.join(__dirname, '../dist/index.html'));
+});
 
 // Export the app for testing
 module.exports = app;
