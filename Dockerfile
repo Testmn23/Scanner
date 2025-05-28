@@ -8,7 +8,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install system dependencies for node-canvas (used by qr-code-styling)
-RUN apk add --no-cache build-base python3 make g++ cairo-dev jpeg-dev pango-dev giflib-dev librsvg-dev
+RUN apk add --no-cache build-base python3 make g++ cairo-dev jpeg-dev pango-dev giflib-dev librsvg-dev ttf-dejavu fontconfig
 
 # Update npm to the latest version
 RUN npm install -g npm@latest
