@@ -44,15 +44,8 @@ async function generateFramedQrCodeSvg(qrData, qrOutputFormat, frameOptions) {
   const padding = parsePixels(style.padding);
   const borderWidth = parsePixels(style.borderWidth);
   
-  // --- Debugging: Temporarily simplify text styling ---
-  const debugFontSizeStr = "20px"; // Fixed size for debugging
-  const debugFontSize = parsePixels(debugFontSizeStr); // Use this for calculations
-  const debugTextColor = "red";
-  const debugFontFamily = "Arial";
-  // --- End Debugging ---
-
   // borderRadius is used directly as a string in SVG rect
-  // const fontSize = parsePixels(style.fontSize); // Original line, use debugFontSize for calculations now
+  const fontSize = parsePixels(style.fontSize); // Restored: Use dynamic fontSize from style
 
   let qrElementXml = '';
   // Consistent handling: always use <image> with base64 data URI for QR code embedding in frame
@@ -88,8 +81,8 @@ async function generateFramedQrCodeSvg(qrData, qrOutputFormat, frameOptions) {
 
   let textElementHeight = 0;
   if (frameText) {
-    // Use debugFontSize for height calculation during debugging
-    textElementHeight = debugFontSize * 1.2 + padding; // debugFontSize + some breathing room + padding between text and QR
+    // Restored: Use dynamic fontSize for height calculation
+    textElementHeight = fontSize * 1.2 + padding; // fontSize + some breathing room + padding between text and QR
   }
 
   let totalWidth = qrCodeWidth + 2 * (padding + borderWidth);
@@ -129,19 +122,11 @@ async function generateFramedQrCodeSvg(qrData, qrOutputFormat, frameOptions) {
   ];
 
   if (frameText) {
-    // --- Debugging: Log text attributes and use simplified styles ---
-    const effectiveFontFamily = debugFontFamily; // Temporarily debugFontFamily, original: style.fontFamily;
-    const effectiveFontSize = debugFontSizeStr; // Temporarily debugFontSizeStr, original: style.fontSize;
-    const effectiveTextColor = debugTextColor; // Temporarily debugTextColor, original: style.textColor;
-    const effectiveTextAlign = style.textAlign === 'center' ? 'middle' : (style.textAlign === 'right' ? 'end' : 'start');
-    const effectiveDominantBaseline = style.textBaseline === 'middle' ? 'central' : style.textBaseline; // Using 'central' for vertical centering
+    // Restored: Use dynamic styling from the 'style' object
+    const textAlign = style.textAlign === 'center' ? 'middle' : (style.textAlign === 'right' ? 'end' : 'start');
+    const dominantBaseline = style.textBaseline === 'middle' ? 'central' : style.textBaseline;
 
-    console.log(`[Debug Frame Text] Calculated textX: ${textX}, textY: ${textY}`);
-    console.log(`[Debug Frame Text] Effective Styles: fill="${effectiveTextColor}", font-family="${effectiveFontFamily}", font-size="${effectiveFontSize}", text-anchor="${effectiveTextAlign}", dominant-baseline="${effectiveDominantBaseline}"`);
-    console.log(`[Debug Frame Text] textElementHeight: ${textElementHeight}, padding: ${padding}, qrOffsetY: ${qrOffsetY}, qrCodeHeight: ${qrCodeHeight}`);
-    // --- End Debugging ---
-
-    svgParts.push(`<text x="${textX}" y="${textY}" font-family="${effectiveFontFamily}" font-size="${effectiveFontSize}" fill="${effectiveTextColor}" text-anchor="${effectiveTextAlign}" dominant-baseline="${effectiveDominantBaseline}">${frameText}</text>`);
+    svgParts.push(`<text x="${textX}" y="${textY}" font-family="${style.fontFamily}" font-size="${style.fontSize}" fill="${style.textColor}" text-anchor="${textAlign}" dominant-baseline="${dominantBaseline}">${frameText}</text>`);
   }
 
   svgParts.push(`</svg>`);
