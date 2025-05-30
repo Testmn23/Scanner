@@ -43,7 +43,7 @@ async function generateFramedQrCodeSvg(qrData, qrOutputFormat, frameOptions) {
 
   const padding = parsePixels(style.padding);
   const borderWidth = parsePixels(style.borderWidth);
-  
+
   // borderRadius is used directly as a string in SVG rect
   const fontSize = parsePixels(style.fontSize); // Restored: Use dynamic fontSize from style
 
@@ -74,7 +74,7 @@ async function generateFramedQrCodeSvg(qrData, qrOutputFormat, frameOptions) {
   } else {
     throw new Error(`Unsupported qrOutputFormat for frame generation: ${qrOutputFormat}`);
   }
-  
+
   // This ensures qrElementXml is always an <image> tag.
   // x, y, width, height attributes are applied to this <image> tag later.
   qrElementXml = `<image xlink:href="data:${qrMimeType};base64,${base64QrImage}" width="${qrCodeWidth}" height="${qrCodeHeight}" />`;
@@ -85,33 +85,47 @@ async function generateFramedQrCodeSvg(qrData, qrOutputFormat, frameOptions) {
     textElementHeight = fontSize * 1.2 + padding; // fontSize + some breathing room + padding between text and QR
   }
 
+  let textElementSideWidth = 0;
+  if (frameText) {
+    // Estimate for width of side text block (heuristic)
+    textElementSideWidth = fontSize * 8 + padding;
+  }
+
   let totalWidth = qrCodeWidth + 2 * (padding + borderWidth);
   let totalHeight = qrCodeHeight + 2 * (padding + borderWidth);
-  let qrOffsetY = padding + borderWidth; // Initial Y position for QR
-  let textX = totalWidth / 2;
+  let qrOffsetX = padding + borderWidth; // Default X position for QR
+  let qrOffsetY = padding + borderWidth; // Default Y position for QR
+  let textX;
   let textY;
 
   if (frameText) {
     if (frameTextPosition === 'top') {
       totalHeight += textElementHeight;
       qrOffsetY += textElementHeight; // Push QR down
-      // For dominant-baseline="central", textY is the center of the text.
-      // Place it in the middle of the top text area.
-      textY = padding + borderWidth + (textElementHeight - padding) / 2;
-    } else { // 'bottom'
+      textX = totalWidth / 2; // Centered horizontally
+      textY = padding + borderWidth + (textElementHeight - padding) / 2; // Middle of the top text area
+    } else if (frameTextPosition === 'bottom') {
       totalHeight += textElementHeight;
-      // For dominant-baseline="central", textY is the center of the text.
-      // Place it in the middle of the bottom text area.
-      // qrOffsetY is already padding + borderWidth. QR image starts at qrOffsetY.
-      // Bottom of QR image is qrOffsetY + qrCodeHeight.
-      // Top of bottom text area is qrOffsetY + qrCodeHeight + padding.
-      // Middle of bottom text area is qrOffsetY + qrCodeHeight + padding + (textElementHeight - padding) / 2.
-      textY = qrOffsetY + qrCodeHeight + padding + (textElementHeight - padding) / 2;
+      textX = totalWidth / 2; // Centered horizontally
+      // qrOffsetY remains default
+      textY = qrOffsetY + qrCodeHeight + padding + (textElementHeight - padding) / 2; // Middle of the bottom text area
+    } else if (frameTextPosition === 'left') {
+      totalWidth += textElementSideWidth;
+      qrOffsetX += textElementSideWidth; // Push QR to the right
+      // qrOffsetY remains default
+      textX = padding + borderWidth + (textElementSideWidth - padding) / 2; // Center of the left text block
+      textY = totalHeight / 2; // Vertically center text in the frame
+    } else if (frameTextPosition === 'right') {
+      totalWidth += textElementSideWidth;
+      // qrOffsetX remains default
+      // qrOffsetY remains default
+      textX = qrCodeWidth + 2 * (padding + borderWidth) + padding + (textElementSideWidth - padding) / 2; // Center of the right text block
+      textY = totalHeight / 2; // Vertically center text in the frame
     }
   }
-  
+
   // Position the <image> element (qrElementXml already contains the <image> tag with data URI)
-  const positionedQrElement = `<image xlink:href="${qrElementXml.match(/href="([^"]+)"/)[1]}" x="${padding + borderWidth}" y="${qrOffsetY}" width="${qrCodeWidth}" height="${qrCodeHeight}" />`;
+  const positionedQrElement = `<image xlink:href="${qrElementXml.match(/href="([^"]+)"/)[1]}" x="${qrOffsetX}" y="${qrOffsetY}" width="${qrCodeWidth}" height="${qrCodeHeight}" />`;
 
   const svgParts = [
     // Ensure xmlns:xlink is defined for xlink:href
@@ -139,7 +153,7 @@ const port = process.env.PORT || 8080; // Define port here for use in the listen
 
 // 1. General middleware like body parsers
 // Increased limit for base64 image uploads
-app.use(express.json({ limit: '10mb' })); 
+app.use(express.json({ limit: '10mb' }));
 
 // 2. API request logging middleware
 app.use('/api', (req, res, next) => {
@@ -212,7 +226,7 @@ app.post('/api/qrcode', async (req, res) => {
       color: 'transparent'
     };
   }
-  
+
   // Determine the format for initial QR generation based on dynamic parameters
   const initialGenerateFormat = showFrame ? 'svg' : (outputFormat.toLowerCase() === 'svg' ? 'svg' : 'png');
   console.log(`Initial QR generation format: ${initialGenerateFormat}, Target output format: ${outputFormat}`);
@@ -223,16 +237,16 @@ app.post('/api/qrcode', async (req, res) => {
     jsdom: JSDOM,
     ...finalQrStylingOptions, // Use the dynamically constructed options
     // Force width/height for QRCodeStyling instance, margin will be applied by the library
-    width: finalQrStylingOptions.width, 
+    width: finalQrStylingOptions.width,
     height: finalQrStylingOptions.height,
   });
 
   try {
     // Generate QR data
-    let generatedQrData = await qrCode.getRawData(initialGenerateFormat); 
+    let generatedQrData = await qrCode.getRawData(initialGenerateFormat);
     let finalBuffer;
     let contentType;
-    
+
     let compositeSvgString;
 
     if (showFrame) {
@@ -271,7 +285,7 @@ app.post('/api/qrcode', async (req, res) => {
     } else { // No frame - THIS PATH SHOULD BE TAKEN
       console.log('No frame. Initial format:', initialGenerateFormat, 'Target format:', outputFormat);
       // Since initialGenerateFormat and outputFormat are both 'png', this condition should be true
-      if (initialGenerateFormat === outputFormat) { 
+      if (initialGenerateFormat === outputFormat) {
         finalBuffer = Buffer.isBuffer(generatedQrData) ? generatedQrData : Buffer.from(generatedQrData);
         contentType = `image/${initialGenerateFormat}`; // Should be 'image/png'
       } else { // Conversion needed for non-framed QR - THIS BLOCK SHOULD BE SKIPPED
@@ -366,10 +380,10 @@ app.post('/api/scan', async (req, res) => {
     if (!imageBuffer || imageBuffer.length === 0) {
         return res.status(400).json({ error: "Image data is empty or invalid." });
     }
-    
+
     const image = sharp(imageBuffer);
     const metadata = await image.metadata();
-    
+
     // Ensure we have RGB/RGBA data for ZXing
     // Sharp's .raw() typically gives RGB or RGBA.
     // If it's just one channel (grayscale), ensure it's expanded or compatible.

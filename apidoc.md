@@ -102,7 +102,7 @@ This API allows for dynamic generation of customizable QR codes and scanning of 
 *   **Response:**
     *   Success: The raw image data (PNG, JPEG, SVG, or WEBP). `Content-Type` will match the image format.
     *   Error: JSON object with an `error` message. (See Error Handling section).
-    
+
     **Note on `curl` Usage for Images:**
     When using `curl` to fetch image formats (PNG, JPEG, WEBP, SVG), the raw image data will not display correctly in your terminal for binary formats. To save the image to a file, use the `-o <filename>` flag, for example:
     `curl -X POST ... -o qrcode.png`

@@ -1,7 +1,7 @@
 FROM node:lts-alpine
 
 # http-server is no longer needed as we use Express.js
-# RUN npm install -g http-server 
+# RUN npm install -g http-server
 
 WORKDIR /app
 

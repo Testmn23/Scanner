@@ -211,7 +211,7 @@ describe('/api/scan endpoint integration tests', () => {
     expect(response.body).toHaveProperty('error');
     expect(response.body.error).toContain("Invalid base64Image format.");
   });
-  
+
   // Test Case 5: Scan from invalid/inaccessible image URL
   it('should return 400 for an invalid or inaccessible image URL', async () => {
     const response = await request(app)
