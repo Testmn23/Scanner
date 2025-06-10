@@ -27,8 +27,8 @@ This API allows for dynamic generation of customizable QR codes and scanning of 
     |-----------------------|----------|----------|----------------------------------------------------------|------------------------------------------------------------------------------------------------------------|---------------------------------------------------------|
     | `data`                | string   | Yes      | N/A                                                      | The content to encode in the QR code (e.g., URL, text).                                                    | `"https://example.com"`                                   |
     | `outputFormat`        | string   | No       | `"png"`                                                  | Desired output image format. Supported: `"png"`, `"jpeg"`, `"svg"`, `"webp"`.                              | `"svg"`                                                 |
-    | `width`               | number   | No       | `300`                                                    | Width of the QR code image in pixels (excluding frame).                                                    | `400`                                                   |
-    | `height`              | number   | No       | `300`                                                    | Height of the QR code image in pixels (excluding frame).                                                   | `400`                                                   |
+    | `width`               | number   | No       | `300`                                                    | Width of the QR code image in pixels (excluding frame). For higher resolution/quality images (e.g., HD or 4K), provide larger pixel values (e.g., `1920`). Note that very large dimensions may increase processing time. | `400`                                                   |
+    | `height`              | number   | No       | `300`                                                    | Height of the QR code image in pixels (excluding frame). For higher resolution/quality images (e.g., HD or 4K), provide larger pixel values (e.g., `1920`). Note that very large dimensions may increase processing time. | `400`                                                   |
     | `margin`              | number   | No       | `0`                                                      | Margin around the QR code in pixels (applied by `qr-code-styling` library).                                  | `10`                                                    |
     | `image`               | string   | No       | N/A                                                      | URL or Base64 Data URI of an image to embed in the center of the QR code.                                  | `"data:image/png;base64,..."` or `"https://my.logo/img.png"` |
     | `qrOptions`           | object   | No       | `{ "errorCorrectionLevel": "Q" }`                        | Options for `qrcode-generator`.                                                                            | `{ "errorCorrectionLevel": "H" }`                     |
@@ -51,16 +51,16 @@ This API allows for dynamic generation of customizable QR codes and scanning of 
     | `cornersDotOptions.color`| string  | No       | `"#000000"`                                              | Color of the corner dots.                                                                                  |                                                         |
     | `showFrame`           | boolean  | No       | `false`                                                  | Whether to add a styled frame around the QR code. If true, output is always SVG initially, then converted. | `true`                                                  |
     | `frameText`           | string   | No       | `""`                                                     | Text to display in the frame. Consider required if `showFrame` is true and text is desired.                 | `"Scan Me!"`                                            |
-    | `frameTextPosition`   | string   | No       | `"bottom"`                                               | Position of the text: `"top"`, `"bottom"`. (API supports top/bottom for frame text).                       | `"bottom"`                                              |
+    | `frameTextPosition`   | string   | No       | `"bottom"`                                               | Position of the text: `"top"`, `"bottom"`, `"left"`, `"right"`.                                            | `"right"`                                               |
     | `frameStyle`          | object   | No       | See defaults in API implementation                       | Styling for the frame.                                                                                     | See example                                             |
     | `frameStyle.backgroundColor` | string | No   | `"#ffffff"`                                              | Frame background color.                                                                                    | `{"backgroundColor": "#333", "textColor": "#FFF"}`       |
     | `frameStyle.textColor`| string   | No       | `"#000000"`                                              | Frame text color.                                                                                          |                                                         |
     | `frameStyle.borderColor`| string   | No       | `"#000000"`                                              | Frame border color.                                                                                        |                                                         |
-    | `frameStyle.borderWidth`| string   | No       | `"1px"`                                                  | Frame border width (e.g., "5px"). Parsed as pixels.                                                         | `"5px"`                                                 |
-    | `frameStyle.borderRadius`| string  | No       | `"0px"`                                                  | Frame border radius (e.g., "10px"). Parsed as pixels.                                                        | `"15px"`                                                |
-    | `frameStyle.padding`    | string   | No       | `"16px"`                                                 | Frame padding (e.g., "20px"). Parsed as pixels.                                                            | `"25px"`                                                |
-    | `frameStyle.fontFamily` | string   | No       | `"Arial, sans-serif"`                                    | Frame text font family.                                                                                    | `"Verdana"`                                             |
-    | `frameStyle.fontSize`   | string   | No       | `"16px"`                                                 | Frame text font size. Parsed as pixels.                                                                    | `"20px"`                                                |
+    | `frameStyle.borderWidth`| string   | No       | `"1px"`                                                  | Frame border width (e.g., "5px"). Parsed as pixels if string.                                               | `"5px"`                                                 |
+    | `frameStyle.borderRadius`| string  | No       | `"0px"`                                                  | Frame border radius (e.g., "10px"). Parsed as pixels if string.                                              | `"15px"`                                                |
+    | `frameStyle.padding`    | string   | No       | `"16px"`                                                 | Frame padding (e.g., "20px"). Parsed as pixels if string.                                                  | `"25px"`                                                |
+    | `frameStyle.fontFamily` | string   | No       | `"Arial, sans-serif"`                                    | Frame text font family. e.g., 'Arial, sans-serif', 'DejaVu Sans', 'Verdana'. Standard system fonts are recommended for best compatibility. | `"Verdana"`                                             |
+    | `frameStyle.fontSize`   | string   | No       | `"16px"`                                                 | Frame text font size. Parsed as pixels if string.                                                          | `"20px"`                                                |
 
 *   **Example Request (Simple PNG):**
     ```bash
@@ -162,4 +162,18 @@ This API allows for dynamic generation of customizable QR codes and scanning of 
     *   `404 Not Found`:
         *   For `/api/scan`: No QR code or barcode was found in the provided image.
         *   (Standard) If an invalid API path is requested.
-    *   `500 Internal Server Error`: An unexpected error occurred on the server (e.g., failure during QR code generation/scanning process, image processing issues, unsupported output format for conversion).
+    *   `500 Internal Server Error`: An unexpected error occurred on the server (e.g., failure during QR code generation/scanning process, image processing issues).
+
+## 5. Future Enhancements
+
+### Authentication
+
+Currently, the API is open and does not require authentication. Future enhancements could include API key-based authentication or token-based (JWT) authentication.
+
+### Rate Limiting
+
+No rate limits are currently enforced. For production environments, implementing rate limiting (e.g., using middleware like `express-rate-limit`) would be recommended to prevent abuse and ensure fair usage. This could be based on IP address or API keys if authentication is added.
+
+### Quotas
+
+Usage quotas (e.g., number of API calls per month) are not currently implemented. This could be a future enhancement, potentially tied to user accounts or subscription tiers if an authentication system is in place.
