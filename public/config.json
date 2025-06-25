@@ -1,0 +1,7 @@
+{
+  "isMaintenanceModeEnabled": false,
+  "maintenanceMessage": "<h1>We'll be back shortly!</h1><p>The site is currently undergoing scheduled maintenance. Please try again later.</p>",
+  "isPasswordProtectionEnabled": false,
+  "isCustomMessageModeEnabled": false,
+  "customMessage": "<h1>Welcome!</h1><p>This is a custom message. The main application is currently not available through this page.</p>"
+}

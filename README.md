@@ -113,6 +113,48 @@ https://github.com/lyqht/mini-qr/assets/35736525/991b2d7e-f168-4354-9091-1678d2c
 
 Mini-QR can easily be self-hosted. We provide a [docker-compose.yml](docker-compose.yml) file as well as our own images. We are using GitHub's `ghrc.io` Container Registry.
 
+## Frontend Gate Modes (Maintenance, Password, Custom Message)
+
+Mini-QR supports several frontend gate modes that can alter what a user sees before accessing the main application. These modes do not affect any API functionality. They are configured via a `config.json` file in the `public` directory and an environment variable.
+
+**Configuration File (`public/config.json`):**
+
+Create this file to enable and customize the gate modes. If the file is not found or is invalid, default settings (all modes disabled) will apply.
+
+```json
+{
+  "isCustomMessageModeEnabled": false,
+  "customMessage": "<h1>Site Temporarily Offline</h1><p>Please check back later. This message supports custom HTML.</p>",
+  "isPasswordProtectionEnabled": false,
+  "isMaintenanceModeEnabled": false,
+  "maintenanceMessage": "<h1>We'll be back shortly!</h1><p>The site is currently undergoing scheduled maintenance.</p>"
+}
+```
+
+**Fields:**
+
+*   `isCustomMessageModeEnabled` (boolean): If `true`, displays the content of `customMessage` instead of the app or any other mode. This has the highest priority.
+*   `customMessage` (string): HTML content to display when `isCustomMessageModeEnabled` is `true`.
+*   `isPasswordProtectionEnabled` (boolean): If `true` (and custom message mode is `false`), prompts the user for a password before proceeding.
+*   `isMaintenanceModeEnabled` (boolean): If `true` (and custom message mode is `false`, and password protection is either `false` or successfully bypassed), displays the `maintenanceMessage`.
+*   `maintenanceMessage` (string): HTML content to display when maintenance mode is active.
+
+**Password Configuration (Environment Variable):**
+
+The password for the password protection mode must be set via an environment variable at build time:
+
+*   `VITE_APP_PASSWORD`: Set this to the desired password (e.g., `VITE_APP_PASSWORD="yourSecretPassword123"`). Refer to `.env.example` for an example.
+
+**Priority Logic:**
+
+1.  **Custom Message Mode:** If `isCustomMessageModeEnabled` is `true`.
+2.  **Password Protection Mode:** If `isCustomMessageModeEnabled` is `false` AND `isPasswordProtectionEnabled` is `true`.
+    *   If the password is correct, it then checks `isMaintenanceModeEnabled`. If true, the maintenance message is shown; otherwise, the app is shown.
+3.  **Maintenance Mode:** If `isCustomMessageModeEnabled` is `false`, AND `isPasswordProtectionEnabled` is `false` (or password was correct), AND `isMaintenanceModeEnabled` is `true`.
+4.  **Normal App:** If all enabling flags are `false` (or password conditions are met for app display).
+
+**Rate Limiting:** The password prompt includes client-side rate limiting (5 attempts before a 5-minute lockout) to deter brute-force attempts. This uses `localStorage`.
+
 ```bash
 wget https://github.com/lyqht/mini-qr/raw/main/docker-compose.yml
 
