@@ -85,47 +85,65 @@ async function generateFramedQrCodeSvg(qrData, qrOutputFormat, frameOptions) {
     textElementHeight = fontSize * 1.2 + padding; // fontSize + some breathing room + padding between text and QR
   }
 
+  const SIDE_TEXT_AREA_WIDTH = 200; // As per QRCodeFrame.vue
+  const GAP_WIDTH = 16; // 1rem assumed as 16px
+
   let totalWidth = qrCodeWidth + 2 * (padding + borderWidth);
   let totalHeight = qrCodeHeight + 2 * (padding + borderWidth);
-  let qrOffsetY = padding + borderWidth; // Initial Y position for QR
-  let textX = totalWidth / 2;
+  let qrDrawX = padding + borderWidth;
+  let qrDrawY = padding + borderWidth;
+  let textX;
   let textY;
+  let textElementWidth = 0; // For side text calculations
 
   if (frameText) {
-    if (frameTextPosition === 'top') {
-      totalHeight += textElementHeight;
-      qrOffsetY += textElementHeight; // Push QR down
-      // For dominant-baseline="central", textY is the center of the text.
-      // Place it in the middle of the top text area.
-      textY = padding + borderWidth + (textElementHeight - padding) / 2;
-    } else { // 'bottom'
-      totalHeight += textElementHeight;
-      // For dominant-baseline="central", textY is the center of the text.
-      // Place it in the middle of the bottom text area.
-      // qrOffsetY is already padding + borderWidth. QR image starts at qrOffsetY.
-      // Bottom of QR image is qrOffsetY + qrCodeHeight.
-      // Top of bottom text area is qrOffsetY + qrCodeHeight + padding.
-      // Middle of bottom text area is qrOffsetY + qrCodeHeight + padding + (textElementHeight - padding) / 2.
-      textY = qrOffsetY + qrCodeHeight + padding + (textElementHeight - padding) / 2;
+    if (frameTextPosition === 'top' || frameTextPosition === 'bottom') {
+      textElementWidth = totalWidth - 2 * (padding + borderWidth); // Text spans full inner width
+      totalHeight += textElementHeight; // textElementHeight includes its own padding
+      textX = totalWidth / 2;
+      if (frameTextPosition === 'top') {
+        qrDrawY += textElementHeight;
+        textY = padding + borderWidth + (textElementHeight - padding) / 2; // Middle of text area
+      } else { // bottom
+        textY = qrDrawY + qrCodeHeight + padding + (textElementHeight - padding) / 2; // Middle of text area
+      }
+    } else if (frameTextPosition === 'left' || frameTextPosition === 'right') {
+      textElementWidth = SIDE_TEXT_AREA_WIDTH;
+      totalWidth += textElementWidth + GAP_WIDTH;
+      // totalHeight is already qrCodeHeight + 2 * (padding + borderWidth)
+      // QR code and text block will be vertically centered within this height.
+      // For simplicity, textY will be the center of totalHeight.
+      // qrDrawY is already padding + borderWidth, which is fine.
+
+      textY = totalHeight / 2; // Vertically center text in the frame
+
+      if (frameTextPosition === 'left') {
+        qrDrawX += textElementWidth + GAP_WIDTH;
+        textX = padding + borderWidth + (textElementWidth / 2);
+      } else { // right
+        // qrDrawX is already correct (padding + borderWidth)
+        textX = padding + borderWidth + qrCodeWidth + GAP_WIDTH + (textElementWidth / 2);
+      }
     }
   }
   
-  // Position the <image> element (qrElementXml already contains the <image> tag with data URI)
-  const positionedQrElement = `<image xlink:href="${qrElementXml.match(/href="([^"]+)"/)[1]}" x="${padding + borderWidth}" y="${qrOffsetY}" width="${qrCodeWidth}" height="${qrCodeHeight}" />`;
+  const qrImageHref = qrElementXml.match(/href="([^"]+)"/)[1];
+  const positionedQrElement = `<image xlink:href="${qrImageHref}" x="${qrDrawX}" y="${qrDrawY}" width="${qrCodeWidth}" height="${qrCodeHeight}" />`;
 
   const svgParts = [
-    // Ensure xmlns:xlink is defined for xlink:href
     `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${totalWidth}" height="${totalHeight}">`,
-    // Frame rectangle: fill is set once from style.backgroundColor
     `<rect x="0" y="0" width="${totalWidth}" height="${totalHeight}" fill="${style.backgroundColor}" stroke="${style.borderColor}" stroke-width="${borderWidth}" rx="${style.borderRadius}" ry="${style.borderRadius}" />`,
     positionedQrElement
   ];
 
   if (frameText) {
-    // Restored: Use dynamic styling from the 'style' object
     const textAlign = style.textAlign === 'center' ? 'middle' : (style.textAlign === 'right' ? 'end' : 'start');
+    // For side text, dominant-baseline="central" is good for vertical centering.
+    // For top/bottom, it's also fine as textY is calculated to be the center of the text area.
     const dominantBaseline = style.textBaseline === 'middle' ? 'central' : style.textBaseline;
 
+    // Add a <g> wrapper for side text if we wanted to clip it, but not doing that for now.
+    // Text will just use its calculated textX, textY and text-anchor.
     svgParts.push(`<text x="${textX}" y="${textY}" font-family="${style.fontFamily}" font-size="${style.fontSize}" fill="${style.textColor}" text-anchor="${textAlign}" dominant-baseline="${dominantBaseline}">${frameText}</text>`);
   }
 
