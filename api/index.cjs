@@ -710,6 +710,171 @@ app.put('/api/apikeys/:apiKey', verifyFirebaseIdToken, async (req, res) => {
 
 // --- End API Key Management Endpoints ---
 
+// --- Usage Statistics Endpoints ---
+app.get('/api/usage/summary', verifyFirebaseIdToken, async (req, res) => {
+  try {
+    const ownerUid = req.user.uid;
+
+    if (typeof db.collection !== 'function') {
+      console.error(`[${new Date().toISOString()}] GET /api/usage/summary - Firestore not initialized for UID ${ownerUid}.`);
+      return res.status(503).json({ error: "Service unavailable: Dependent service not initialized." });
+    }
+
+    let totalActiveKeys = 0;
+    let totalCreditsRemaining = 0;
+    let totalUsageCountAllTime = 0;
+
+    // Get all keys for the user to calculate summary stats
+    const apiKeysSnapshot = await db.collection('apiKeys').where('ownerUid', '==', ownerUid).get();
+
+    if (!apiKeysSnapshot.empty) {
+      apiKeysSnapshot.forEach(doc => {
+        const keyData = doc.data();
+        totalUsageCountAllTime += Number(keyData.usageCount || 0);
+        if (keyData.status === 'active') {
+          totalActiveKeys++;
+          totalCreditsRemaining += Number(keyData.credits || 0);
+        }
+      });
+    }
+
+    // Calculate recent usage (e.g., last 30 days)
+    // For simplicity, this example counts successful logs in the last 30 days.
+    // More complex aggregation (sum of creditsConsumed, etc.) can be added.
+    let recentUsageCountLast30Days = 0;
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const thirtyDaysAgoTimestamp = admin.firestore.Timestamp.fromDate(thirtyDaysAgo);
+
+    const recentLogsSnapshot = await db.collection('apiKeyUsageLogs')
+      .where('ownerUid', '==', ownerUid)
+      .where('status', '==', 'success') // Only count successful calls for this metric
+      .where('timestamp', '>=', thirtyDaysAgoTimestamp)
+      .get();
+
+    recentUsageCountLast30Days = recentLogsSnapshot.size; // Number of successful log entries
+
+    res.status(200).json({
+      totalActiveKeys,
+      totalCreditsRemaining,
+      totalUsageCountAllTime,
+      recentUsageCountLast30Days,
+    });
+
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Error in GET /api/usage/summary for UID ${req.user?.uid}:`, error);
+    if (error === uninitializedFirestoreError || error === uninitializedAuthError) {
+      return res.status(503).json({ error: "Service unavailable: Dependent service not initialized." });
+    }
+    res.status(500).json({ error: "Internal Server Error: Could not retrieve usage summary." });
+  }
+});
+
+app.get('/api/usage/history', verifyFirebaseIdToken, async (req, res) => {
+  try {
+    const ownerUid = req.user.uid;
+
+    if (typeof db.collection !== 'function') {
+      console.error(`[${new Date().toISOString()}] GET /api/usage/history - Firestore not initialized for UID ${ownerUid}.`);
+      return res.status(503).json({ error: "Service unavailable: Dependent service not initialized." });
+    }
+
+    const { apiKeyId, startDate, endDate, page = 1, limit = 10 } = req.query;
+    const pageNum = parseInt(page as string, 10);
+    const limitNum = parseInt(limit as string, 10);
+
+    if (isNaN(pageNum) || pageNum < 1) {
+      return res.status(400).json({ error: "Invalid 'page' parameter. Must be a positive integer." });
+    }
+    if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) { // Max limit of 100
+      return res.status(400).json({ error: "Invalid 'limit' parameter. Must be an integer between 1 and 100." });
+    }
+
+    let query = db.collection('apiKeyUsageLogs').where('ownerUid', '==', ownerUid);
+
+    if (apiKeyId && typeof apiKeyId === 'string') {
+      query = query.where('apiKey', '==', apiKeyId);
+    }
+    if (startDate && typeof startDate === 'string') {
+      try {
+        query = query.where('timestamp', '>=', admin.firestore.Timestamp.fromDate(new Date(startDate)));
+      } catch (e) { return res.status(400).json({ error: "Invalid 'startDate' format. Use ISO date string."}); }
+    }
+    if (endDate && typeof endDate === 'string') {
+      try {
+        query = query.where('timestamp', '<=', admin.firestore.Timestamp.fromDate(new Date(endDate)));
+      } catch (e) { return res.status(400).json({ error: "Invalid 'endDate' format. Use ISO date string."}); }
+    }
+
+    // For total count, we need to run a count query without pagination filters related to document cursors
+    // Firestore's node client as of v6+ has getCount()
+    const countSnapshot = await query.count().get();
+    const totalCount = countSnapshot.data().count;
+
+    query = query.orderBy('timestamp', 'desc'); // Order before pagination
+
+    // Pagination
+    if (pageNum > 1) {
+        const offset = (pageNum - 1) * limitNum;
+        // Fetch the last document of the previous page to use as startAfter cursor
+        // This is more robust than offset for very large datasets, but offset is simpler for moderate sizes.
+        // For simplicity here, using offset. For very large scale, switch to cursor-based.
+        const previousDocsSnapshot = await query.limit(offset).get();
+        if (previousDocsSnapshot.docs.length === offset && previousDocsSnapshot.docs.length > 0) {
+             query = query.startAfter(previousDocsSnapshot.docs[previousDocsSnapshot.docs.length - 1]);
+        } else if (offset > 0 && previousDocsSnapshot.docs.length < offset) {
+            // Requested page is beyond the total number of documents
+            return res.status(200).json({
+                logs: [],
+                pagination: {
+                    currentPage: pageNum,
+                    pageSize: limitNum,
+                    totalCount: totalCount,
+                    totalPages: Math.ceil(totalCount / limitNum),
+                }
+            });
+        }
+        // If offset is 0 (pageNum is 1), no need for startAfter.
+    }
+
+    const logsSnapshot = await query.limit(limitNum).get();
+
+    const logs = [];
+    logsSnapshot.forEach(doc => {
+      const data = doc.data();
+      logs.push({
+        logId: doc.id,
+        apiKey: data.apiKey,
+        timestamp: data.timestamp && data.timestamp.toDate ? data.timestamp.toDate().toISOString() : null,
+        endpoint: data.endpoint,
+        status: data.status,
+        creditsConsumed: data.creditsConsumed,
+        ipAddress: data.ipAddress,
+        userAgent: data.userAgent,
+        // ownerUid is not typically returned in the log item itself, as it's implied by the authenticated user
+      });
+    });
+
+    res.status(200).json({
+      logs,
+      pagination: {
+        currentPage: pageNum,
+        pageSize: limitNum,
+        totalCount: totalCount,
+        totalPages: Math.ceil(totalCount / limitNum),
+      }
+    });
+
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Error in GET /api/usage/history for UID ${req.user?.uid}:`, error);
+    if (error === uninitializedFirestoreError || error === uninitializedAuthError) {
+      return res.status(503).json({ error: "Service unavailable: Dependent service not initialized." });
+    }
+    res.status(500).json({ error: "Internal Server Error: Could not retrieve usage history." });
+  }
+});
+// --- End Usage Statistics Endpoints ---
+
 // POST route for /api/qrcode
 app.post('/api/qrcode', authenticateAndManageCredits, async (req, res) => {
   // Restore dynamic parameter handling

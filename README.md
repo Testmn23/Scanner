@@ -398,6 +398,60 @@ All API key management endpoints are protected and require user authentication v
         If the key is already revoked, a 200 OK with `{ "message": "API key is already revoked." }` is returned.
     *   **Error Responses:** 401/403 (Auth/Ownership), 404 (Not Found), 500, 503.
 
+**4. Usage Statistics Endpoints:**
+
+These endpoints allow authenticated users to retrieve information about their API key usage. They are protected and require user authentication via a Firebase ID Token.
+
+*   **`GET /api/usage/summary`**
+    *   **Description:** Retrieves a summary of API key usage and status for the authenticated user.
+    *   **Success Response (200 OK):**
+        ```json
+        {
+          "totalActiveKeys": 3,
+          "totalCreditsRemaining": 2850,
+          "totalUsageCountAllTime": 150,
+          "recentUsageCountLast30Days": 75
+        }
+        ```
+    *   **Error Responses:** 401/403 (Auth), 500 (Server Error), 503 (Service Unavailable).
+
+*   **`GET /api/usage/history`**
+    *   **Description:** Retrieves a paginated list of API usage logs for the authenticated user.
+    *   **Query Parameters:**
+        *   `apiKeyId` (String, Optional): Filter logs for a specific API key string.
+        *   `startDate` (String, Optional): Filter logs on or after this date (ISO 8601 format, e.g., `YYYY-MM-DD`).
+        *   `endDate` (String, Optional): Filter logs on or before this date (ISO 8601 format, e.g., `YYYY-MM-DD`).
+        *   `page` (Number, Optional, Default: `1`): Page number for pagination.
+        *   `limit` (Number, Optional, Default: `10`, Max: `100`): Number of logs per page.
+    *   **Success Response (200 OK):**
+        ```json
+        {
+          "logs": [
+            {
+              "logId": "firestoreDocumentId1",
+              "apiKey": "used_api_key_string",
+              "timestamp": "2023-10-28T14:30:00.000Z",
+              "endpoint": "/api/qrcode",
+              "status": "success",
+              "creditsConsumed": 1,
+              "ipAddress": "123.123.123.123", // May be null
+              "userAgent": "PostmanRuntime/7.29.0" // May be null
+            },
+            // ... more log entries
+          ],
+          "pagination": {
+            "currentPage": 1,
+            "pageSize": 10,
+            "totalCount": 123,
+            "totalPages": 13
+          }
+        }
+        ```
+    *   **Error Responses:**
+        *   `400 Bad Request`: Invalid query parameters (e.g., non-integer page/limit, invalid date format).
+        *   `401/403 Unauthorized/Forbidden`: Authentication error.
+        *   `500 Internal Server Error`, `503 Service Unavailable`.
+
 **Configuration File (`public/config.json`):**
 
 Create this file to enable and customize the gate modes. If the file is not found or is invalid, default settings (all modes disabled) will apply.
