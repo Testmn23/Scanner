@@ -1,6 +1,162 @@
 console.log("--- api/index.cjs script started ---");
+
+const admin = require('firebase-admin');
 const express = require('express');
 const path = require('path');
+
+// --- Firebase Admin SDK Initialization ---
+let db;
+// let auth; // Firebase Auth instance - uncomment when needed for user auth
+
+try {
+  if (process.env.FIREBASE_ADMIN_KEY) {
+    const serviceAccount = JSON.parse(process.env.FIREBASE_ADMIN_KEY);
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+      // Optionally, specify databaseURL if needed, though often inferred:
+      // databaseURL: `https://${serviceAccount.project_id}.firebaseio.com`
+    });
+    db = admin.firestore();
+    // auth = admin.auth();
+    console.log("Firebase Admin SDK initialized successfully using FIREBASE_ADMIN_KEY.");
+  } else {
+    console.warn("Firebase Admin SDK not initialized: FIREBASE_ADMIN_KEY environment variable not set. Firebase-dependent features will fail.");
+    // Create dummy db/auth objects or handle this state appropriately if partial functionality is desired
+    // For now, db will be undefined, and routes using it will fail.
+    // This could be improved with a more explicit "disabled" mode for Firebase features.
+    db = {
+        collection: () => ({
+            doc: () => ({
+                get: async () => ({ exists: false, data: () => ({}) }),
+                set: async () => {},
+                update: async () => {}
+            }),
+            where: () => ({ get: async () => ({ empty: true, docs: [] }) })
+        }),
+        runTransaction: async (callback) => { throw new Error("Firestore is not initialized."); }
+    }; // Dummy Firestore object
+  }
+} catch (error) {
+  console.error("Error initializing Firebase Admin SDK with FIREBASE_ADMIN_KEY:", error);
+  db = {
+      collection: () => ({
+          doc: () => ({
+              get: async () => ({ exists: false, data: () => ({}) }),
+              set: async () => {},
+              update: async () => {}
+          }),
+          where: () => ({ get: async () => ({ empty: true, docs: [] }) })
+      }),
+      runTransaction: async (callback) => { throw new Error("Firestore is not initialized due to an error."); }
+  }; // Dummy Firestore object on error
+}
+
+// --- End Firebase Admin SDK Initialization ---
+
+// --- Authentication and Credit Management Middleware ---
+async function authenticateAndManageCredits(req, res, next) {
+  const apiKeyString = req.headers['x-api-key'];
+
+  // Check if db object is valid (i.e., Firebase initialized properly)
+  if (!db || typeof db.collection !== 'function') {
+    console.error(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} - AuthN/Z Failed: Firestore is not initialized. API key: ${apiKeyString}`);
+    return res.status(503).json({ error: 'Service Unavailable: Authentication service is temporarily down.' });
+  }
+
+  if (!apiKeyString) {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} - AuthN/Z Failed: Missing API key`);
+    return res.status(401).json({ error: 'Unauthorized: API key is missing.' });
+  }
+
+  try {
+    const apiKeyRef = db.collection('apiKeys').doc(apiKeyString);
+    const apiKeyDoc = await apiKeyRef.get();
+
+    if (!apiKeyDoc.exists) {
+      console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} - AuthN/Z Failed: Invalid API key (not found) - ${apiKeyString}`);
+      return res.status(403).json({ error: 'Forbidden: Invalid API key.' });
+    }
+
+    const apiKeyData = apiKeyDoc.data();
+
+    if (apiKeyData.status !== 'active') {
+      console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} - AuthN/Z Failed: API key status is '${apiKeyData.status}' - ${apiKeyString}`);
+      return res.status(403).json({ error: `Forbidden: API key is not active (status: ${apiKeyData.status}).` });
+    }
+
+    const currentCredits = Number(apiKeyData.credits);
+    if (isNaN(currentCredits) || currentCredits <= 0) {
+      console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} - AuthN/Z Failed: Insufficient credits for API key - ${apiKeyString}`);
+      // Log this attempt even if it fails due to credits
+      const usageLogRef = db.collection('apiKeyUsageLogs').doc();
+      await usageLogRef.set({
+        apiKey: apiKeyString,
+        ownerUid: apiKeyData.ownerUid || null,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        endpoint: req.originalUrl,
+        status: 'failure_credits',
+        creditsConsumed: 0,
+        ipAddress: req.ip, // Express req.ip
+        userAgent: req.headers['user-agent'] || null,
+      });
+      return res.status(429).json({ error: 'Too Many Requests: API credit limit reached or insufficient credits.' });
+    }
+
+    // Proceed with transaction to decrement credits and log usage
+    await db.runTransaction(async (transaction) => {
+      const freshApiKeyDoc = await transaction.get(apiKeyRef); // Re-fetch within transaction for consistency
+      if (!freshApiKeyDoc.exists) {
+        // Should not happen if initial check passed, but good to be safe
+        throw new Error("API key disappeared during transaction.");
+      }
+      const freshApiKeyData = freshApiKeyDoc.data();
+      const creditsToDecrement = 1; // Assuming 1 credit per call for now
+
+      if (Number(freshApiKeyData.credits) < creditsToDecrement) {
+        // Credits became insufficient between initial check and transaction start
+        // Log this specific type of failure if desired, or let the initial check catch it mostly
+        throw new Error("Insufficient credits during transaction."); // This will cause the transaction to fail
+      }
+
+      transaction.update(apiKeyRef, {
+        credits: admin.firestore.FieldValue.increment(-creditsToDecrement),
+        usageCount: admin.firestore.FieldValue.increment(1),
+        lastUsedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      const usageLogRef = db.collection('apiKeyUsageLogs').doc(); // Create new log entry
+      transaction.set(usageLogRef, {
+        apiKey: apiKeyString,
+        ownerUid: apiKeyData.ownerUid || null, // Use original apiKeyData for ownerUid for consistency in this log
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        endpoint: req.originalUrl,
+        status: 'success',
+        creditsConsumed: creditsToDecrement,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'] || null,
+      });
+    });
+
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} - API key validated, credits updated - ${apiKeyString}`);
+    req.apiKeyInfo = { key: apiKeyString, data: apiKeyData }; // Attach info for route handlers
+    next();
+
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} - Error during API key auth/credit management for key ${apiKeyString}:`, error);
+    // Handle specific transaction errors if needed (e.g., "Insufficient credits during transaction")
+    if (error.message === "Insufficient credits during transaction.") {
+        // Log this attempt as a credit failure (might be redundant if already logged before transaction)
+        const usageLogRef = db.collection('apiKeyUsageLogs').doc();
+        // Consider if a duplicate log is okay or if pre-transaction check is enough
+        // For now, not adding a duplicate log here as the pre-check should catch most.
+        // If it's a race condition, the transaction rollback is the protection.
+        return res.status(429).json({ error: 'Too Many Requests: API credit limit became insufficient during processing.' });
+    }
+    return res.status(500).json({ error: 'Internal Server Error: Could not process API key authentication.' });
+  }
+}
+// --- End Authentication and Credit Management Middleware ---
+
 const { QRCodeStyling } = require("qr-code-styling/lib/qr-code-styling.common.js");
 const nodeCanvas = require('canvas');
 const { JSDOM } = require('jsdom');
@@ -186,7 +342,7 @@ app.get('/api/scan', (req, res) => {
 });
 
 // POST route for /api/qrcode
-app.post('/api/qrcode', async (req, res) => {
+app.post('/api/qrcode', authenticateAndManageCredits, async (req, res) => {
   // Restore dynamic parameter handling
   const {
     data,
@@ -348,7 +504,7 @@ app.post('/api/qrcode', async (req, res) => {
 
 // POST route for /api/scan
 // This needs to be after the GET handler for /api/scan to avoid path collision if GET was defined later.
-app.post('/api/scan', async (req, res) => {
+app.post('/api/scan', authenticateAndManageCredits, async (req, res) => {
   try {
     const { base64Image, imageUrl } = req.body;
     let imageBuffer;
