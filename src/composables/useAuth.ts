@@ -4,6 +4,7 @@ import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   signOut,
+  updateProfile, // Import updateProfile
   type User as FirebaseUser,
   getIdToken as getFirebaseIdToken
 } from 'firebase/auth';
@@ -166,5 +167,24 @@ export function useAuth() {
     signupViaBackend, // Changed from signupWithEmailPassword to reflect it calls backend
     logoutUser,
     getIdToken,
+    // Method to update display name in both our reactive state and Firebase client auth state
+    updateClientSideUserProfile: async (updates: { displayName?: string; photoURL?: string }) => {
+      if (firebaseClientAuth.currentUser) {
+        try {
+          await updateProfile(firebaseClientAuth.currentUser, updates);
+          // Update local reactive user state as well
+          if (user.value && updates.displayName !== undefined) {
+            user.value.displayName = updates.displayName;
+          }
+          // If photoURL is also managed, update it here too.
+          // Note: onAuthStateChanged might also pick this up, but updating here gives immediate UI feedback.
+          console.log("Client-side user profile updated in Firebase Auth.");
+        } catch (e: any) {
+          console.error("Error updating client-side Firebase user profile:", e);
+          authError.value = e.message || "Failed to update client profile.";
+          // Don't re-throw here, let the caller decide how to handle UI for this specific error
+        }
+      }
+    }
   };
 }

@@ -3,9 +3,14 @@
     <header class="bg-white shadow-md p-4 mb-8 rounded-lg">
       <div class="container mx-auto flex justify-between items-center">
         <h1 class="text-2xl font-semibold text-gray-700">API Key Dashboard</h1>
-        <button @click="logout" class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">
-          Logout (Placeholder)
-        </button>
+        <div class="flex items-center gap-4">
+          <button @click="goToProfile" class="text-indigo-600 hover:text-indigo-800 text-sm font-medium">
+            My Profile
+          </button>
+          <button @click="logout" class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-3 rounded-md text-sm">
+            Logout
+          </button>
+        </div>
       </div>
     </header>
 
@@ -27,13 +32,27 @@
 <script setup lang="ts">
 import UsageSummaryDisplay from './components/UsageSummaryDisplay.vue';
 import UsageHistoryTable from './components/UsageHistoryTable.vue';
+import { useAuth } from '@/composables/useAuth'; // Import useAuth for logout
 
-// Placeholder for logout, will be replaced by useAuth composable later
-function logout() {
-  alert("Logout (placeholder function)");
+const { logoutUser } = useAuth();
+
+function goToProfile() {
   if ((window as any).globalAppState) {
-    (window as any).globalAppState.currentView = 'portal-login'; // Navigate to login
-    window.location.hash = '/portal/login';
+    (window as any).globalAppState.currentView = 'portal-profile';
+    window.location.hash = '/portal/profile';
+  }
+}
+
+async function logout() {
+  try {
+    await logoutUser(); // Use actual logout from useAuth
+    if ((window as any).globalAppState) {
+      (window as any).globalAppState.currentView = 'portal-login';
+      window.location.hash = '/portal/login';
+    }
+  } catch (e) {
+    console.error("Logout failed on dashboard:", e);
+    // Optionally show an error message to the user
   }
 }
 </script>

@@ -398,6 +398,35 @@ All API key management endpoints are protected and require user authentication v
         If the key is already revoked, a 200 OK with `{ "message": "API key is already revoked." }` is returned.
     *   **Error Responses:** 401/403 (Auth/Ownership), 404 (Not Found), 500, 503.
 
+**5. User Profile Management Endpoints:**
+
+These endpoints allow authenticated users to manage their own profile information.
+
+*   **`PUT /api/users/me/displayname`**
+    *   **Protection:** Requires user authentication (Bearer ID Token).
+    *   **Description:** Updates the display name for the authenticated user.
+    *   **Request Body (JSON):**
+        ```json
+        {
+          "displayName": "My New Display Name"
+        }
+        ```
+    *   **Validation:** `displayName` must be a non-empty string (e.g., max 100 characters).
+    *   **Logic:** Updates the `displayName` in both Firebase Authentication and the user's document in the `users` Firestore collection (if it exists).
+    *   **Success Response (200 OK):**
+        ```json
+        {
+          "message": "Display name updated successfully.",
+          "uid": "user_uid",
+          "email": "user_email_from_token",
+          "displayName": "My New Display Name"
+        }
+        ```
+    *   **Error Responses:**
+        *   `400 Bad Request`: Invalid input (e.g., empty display name, too long).
+        *   `401/403 Unauthorized/Forbidden`: Authentication error.
+        *   `500 Internal Server Error`, `503 Service Unavailable`.
+
 **4. Usage Statistics Endpoints:**
 
 These endpoints allow authenticated users to retrieve information about their API key usage. They are protected and require user authentication via a Firebase ID Token.

@@ -875,6 +875,64 @@ app.get('/api/usage/history', verifyFirebaseIdToken, async (req, res) => {
 });
 // --- End Usage Statistics Endpoints ---
 
+// --- User Profile Management Endpoints ---
+app.put('/api/users/me/displayname', verifyFirebaseIdToken, async (req, res) => {
+  try {
+    const uid = req.user.uid; // UID from verified ID token
+    const { displayName } = req.body;
+
+    // Validate input
+    if (!displayName || typeof displayName !== 'string' || displayName.trim().length === 0) {
+      return res.status(400).json({ error: 'Display name is required and must be a non-empty string.' });
+    }
+    const trimmedDisplayName = displayName.trim();
+    if (trimmedDisplayName.length > 100) { // Example max length
+      return res.status(400).json({ error: 'Display name cannot exceed 100 characters.' });
+    }
+
+    // Check if auth and db are initialized
+    if (typeof auth.updateUser !== 'function' || typeof db.collection !== 'function') {
+        console.error(`[${new Date().toISOString()}] PUT /api/users/me/displayname - Firebase services not initialized for UID ${uid}.`);
+        return res.status(503).json({ error: "Service unavailable: Dependent service not initialized." });
+    }
+
+    // Update displayName in Firebase Authentication
+    await auth.updateUser(uid, { displayName: trimmedDisplayName });
+
+    // Update displayName in Firestore 'users' collection (if it exists)
+    const userDocRef = db.collection('users').doc(uid);
+    const userDoc = await userDocRef.get();
+    if (userDoc.exists) {
+      await userDocRef.update({ displayName: trimmedDisplayName });
+    } else {
+      // Optionally create it if it doesn't exist, though signup should ideally create it.
+      // For now, we'll just log if it's not found, as updating Auth is primary.
+      console.log(`[${new Date().toISOString()}] User document not found in Firestore for UID ${uid} during display name update. Auth display name updated.`);
+    }
+
+    console.log(`[${new Date().toISOString()}] Display name updated for UID ${uid} to "${trimmedDisplayName}"`);
+    res.status(200).json({
+      message: "Display name updated successfully.",
+      uid: uid,
+      email: req.user.email, // email from the ID token
+      displayName: trimmedDisplayName,
+    });
+
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Error in PUT /api/users/me/displayname for UID ${req.user?.uid}:`, error);
+    if (error === uninitializedAuthError || error === uninitializedFirestoreError) {
+      return res.status(503).json({ error: "Service unavailable: Dependent service not initialized." });
+    }
+    // Handle specific Firebase Auth errors if necessary (e.g., user not found, though verifyIdToken should prevent this)
+    if (error.code && error.code.startsWith('auth/')) {
+        return res.status(400).json({ error: `Firebase Auth error: ${error.message}` });
+    }
+    res.status(500).json({ error: "Internal Server Error: Could not update display name." });
+  }
+});
+// --- End User Profile Management Endpoints ---
+
+
 // POST route for /api/qrcode
 app.post('/api/qrcode', authenticateAndManageCredits, async (req, res) => {
   // Restore dynamic parameter handling

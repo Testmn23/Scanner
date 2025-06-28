@@ -7,6 +7,7 @@ import PasswordPromptPage from './components/gate/PasswordPromptPage.vue';
 import PortalLoginPage from './views/portal/PortalLoginPage.vue';
 import PortalSignupPage from './views/portal/PortalSignupPage.vue';
 import PortalDashboardPage from './views/portal/PortalDashboardPage.vue';
+import PortalProfilePage from './views/portal/PortalProfilePage.vue'; // Import the new page
 import './index.css';
 import './style.css';
 
@@ -25,7 +26,7 @@ const defaultConfig = {
 // Make appState globally accessible for now for simplified navigation
 // In a larger app, provide/inject or a proper state management (Pinia) would be better.
 const globalAppState = reactive({
-  currentView: 'loading', // loading, custom, password, maintenance, app, portal-login, portal-signup, portal-dashboard
+  currentView: 'loading', // loading, custom, password, maintenance, app, portal-login, portal-signup, portal-dashboard, portal-profile
   config: { ...defaultConfig },
   isGateAuthenticated: false, // For the initial password gate
   // Firebase auth state will be managed separately by a dedicated auth composable/store
@@ -65,6 +66,10 @@ const RootComponent = defineComponent({
       } else if (window.location.hash === '#/portal/dashboard') {
         // Later, this will be protected
         globalAppState.currentView = 'portal-dashboard';
+        return;
+      } else if (window.location.hash === '#/portal/profile') {
+        // Later, this will also be protected
+        globalAppState.currentView = 'portal-profile';
         return;
       }
 
@@ -132,6 +137,9 @@ const RootComponent = defineComponent({
           break;
         case 'portal-dashboard':
           componentToRender = PortalDashboardPage;
+          break;
+        case 'portal-profile':
+          componentToRender = PortalProfilePage;
           break;
         default: // loading or error
           componentToRender = { render: () => h('div', { class: 'gate-page-container' }, [h('div',{ class: 'gate-content-wrapper'}, 'Loading...')]) };

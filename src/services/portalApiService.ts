@@ -138,3 +138,19 @@ export async function getUsageHistory(params: {
   const response = await fetchWithAuth(`${API_BASE_URL}/usage/history?${queryParams.toString()}`);
   return response.json();
 }
+
+// User Profile Management
+interface UserProfileResponse {
+  message: string;
+  uid: string;
+  email: string;
+  displayName: string;
+}
+
+export async function updateUserDisplayName(displayName: string): Promise<UserProfileResponse> {
+  const response = await fetchWithAuth(`${API_BASE_URL}/users/me/displayname`, {
+    method: 'PUT',
+    body: JSON.stringify({ displayName }),
+  });
+  return response.json();
+}
