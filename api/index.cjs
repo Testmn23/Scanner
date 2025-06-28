@@ -1,5 +1,6 @@
 console.log("--- api/index.cjs script started ---");
 
+const crypto = require('crypto');
 const admin = require('firebase-admin');
 const express = require('express');
 const path = require('path');
@@ -415,6 +416,101 @@ app.post('/api/auth/signup', async (req, res) => {
   }
 });
 
+// DELETE /api/apikeys/:apiKey - Revoke an API key for the authenticated user
+app.delete('/api/apikeys/:apiKey', verifyFirebaseIdToken, async (req, res) => {
+  try {
+    const ownerUid = req.user.uid;
+    const apiKeyToRevoke = req.params.apiKey;
+
+    if (typeof db.collection !== 'function') { // Check if Firestore is initialized
+        console.error(`[${new Date().toISOString()}] DELETE /api/apikeys/${apiKeyToRevoke} - Firestore not initialized for UID ${ownerUid}.`);
+        return res.status(503).json({ error: "Service unavailable: Dependent service not initialized." });
+    }
+
+    const apiKeyRef = db.collection('apiKeys').doc(apiKeyToRevoke);
+    const apiKeyDoc = await apiKeyRef.get();
+
+    if (!apiKeyDoc.exists) {
+      return res.status(404).json({ error: "API key not found." });
+    }
+
+    const apiKeyData = apiKeyDoc.data();
+    if (apiKeyData.ownerUid !== ownerUid) {
+      console.warn(`[${new Date().toISOString()}] Unauthorized attempt by UID ${ownerUid} to delete/revoke key ${apiKeyToRevoke} owned by ${apiKeyData.ownerUid}`);
+      return res.status(403).json({ error: "Forbidden: You do not own this API key." });
+    }
+
+    // Instead of deleting, set status to "revoked"
+    // This preserves the key for audit trails and prevents its string from being reused immediately
+    // if we were to generate new keys that could potentially collide (highly unlikely with good randomness).
+    if (apiKeyData.status === 'revoked') {
+        return res.status(200).json({ message: "API key is already revoked." });
+    }
+
+    await apiKeyRef.update({
+      status: "revoked",
+      // Optionally, clear credits or perform other actions upon revocation
+      // credits: 0
+    });
+
+    console.log(`[${new Date().toISOString()}] API Key revoked by UID ${ownerUid}: ${apiKeyToRevoke}`);
+    res.status(200).json({ message: "API key revoked successfully." });
+
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Error in DELETE /api/apikeys/${req.params.apiKey} for UID ${req.user?.uid}:`, error);
+    if (error === uninitializedFirestoreError || error === uninitializedAuthError) {
+        return res.status(503).json({ error: "Service unavailable: Dependent service not initialized." });
+    }
+    res.status(500).json({ error: "Internal Server Error: Could not revoke API key." });
+  }
+});
+
+// GET /api/apikeys - List API keys for the authenticated user
+app.get('/api/apikeys', verifyFirebaseIdToken, async (req, res) => {
+  try {
+    const ownerUid = req.user.uid;
+
+    if (typeof db.collection !== 'function') { // Check if Firestore is initialized
+        console.error(`[${new Date().toISOString()}] GET /api/apikeys - Firestore not initialized for UID ${ownerUid}.`);
+        return res.status(503).json({ error: "Service unavailable: Dependent service not initialized." });
+    }
+
+    const apiKeysSnapshot = await db.collection('apiKeys').where('ownerUid', '==', ownerUid).get();
+
+    if (apiKeysSnapshot.empty) {
+      return res.status(200).json([]); // Return empty array if no keys found
+    }
+
+    const userApiKeys = [];
+    apiKeysSnapshot.forEach(doc => {
+      const data = doc.data();
+      // Convert Firestore Timestamps to a more standard format if they exist
+      const createdAt = data.createdAt && data.createdAt.toDate ? data.createdAt.toDate().toISOString() : null;
+      const lastUsedAt = data.lastUsedAt && data.lastUsedAt.toDate ? data.lastUsedAt.toDate().toISOString() : null;
+
+      userApiKeys.push({
+        apiKey: doc.id, // The document ID is the API key string
+        description: data.description,
+        status: data.status,
+        credits: data.credits,
+        usageCount: data.usageCount,
+        createdAt: createdAt,
+        lastUsedAt: lastUsedAt,
+        scopes: data.scopes || [],
+      });
+    });
+
+    res.status(200).json(userApiKeys);
+
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Error in GET /api/apikeys for UID ${req.user?.uid}:`, error);
+    if (error === uninitializedFirestoreError || error === uninitializedAuthError) {
+        return res.status(503).json({ error: "Service unavailable: Dependent service not initialized." });
+    }
+    res.status(500).json({ error: "Internal Server Error: Could not retrieve API keys." });
+  }
+});
+
 // --- End User Authentication Endpoints ---
 
 // --- Middleware to verify Firebase ID Token ---
@@ -470,6 +566,149 @@ app.get('/api/me', verifyFirebaseIdToken, (req, res) => {
     user: req.user // Send back the decoded token (contains uid, email, etc.)
   });
 });
+
+// --- API Key Management Endpoints ---
+
+// POST /api/apikeys - Create a new API key for the authenticated user
+app.post('/api/apikeys', verifyFirebaseIdToken, async (req, res) => {
+  try {
+    const ownerUid = req.user.uid; // UID from verified ID token
+    const { description } = req.body;
+
+    // Generate a new unique API key string
+    const apiKeyString = crypto.randomBytes(24).toString('hex');
+    // For added prefix to distinguish, e.g., "sk_live_" or "pk_":
+    // const apiKeyString = `sk_live_${crypto.randomBytes(24).toString('hex')}`;
+
+    const initialCredits = 1000; // Default initial credits
+
+    const apiKeyData = {
+      ownerUid: ownerUid,
+      description: description || `API Key created on ${new Date().toLocaleDateString()}`,
+      status: "active",
+      credits: initialCredits,
+      usageCount: 0,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      lastUsedAt: null,
+      scopes: [], // Empty array for scopes initially
+    };
+
+    // Use the generated API key string as the document ID
+    await db.collection('apiKeys').doc(apiKeyString).set(apiKeyData);
+
+    console.log(`[${new Date().toISOString()}] API Key created for UID ${ownerUid}: ${apiKeyString}`);
+    res.status(201).json({
+      message: "API key created successfully. Store this key securely; it will not be shown again.",
+      apiKey: apiKeyString, // Return the key ONCE on creation
+      description: apiKeyData.description,
+      credits: apiKeyData.credits,
+      status: apiKeyData.status,
+    });
+
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Error in POST /api/apikeys for UID ${req.user?.uid}:`, error);
+    if (error === uninitializedFirestoreError || error === uninitializedAuthError) { // Check if db/auth were not initialized
+        return res.status(503).json({ error: "Service unavailable: Dependent service not initialized." });
+    }
+    res.status(500).json({ error: "Internal Server Error: Could not create API key." });
+  }
+});
+
+// PUT /api/apikeys/:apiKey - Update an API key for the authenticated user
+app.put('/api/apikeys/:apiKey', verifyFirebaseIdToken, async (req, res) => {
+  try {
+    const ownerUid = req.user.uid;
+    const apiKeyToUpdate = req.params.apiKey;
+    const { description, status } = req.body;
+
+    // Validate inputs
+    if (description === undefined && status === undefined) {
+      return res.status(400).json({ error: "No fields provided for update. Provide 'description' or 'status'." });
+    }
+    if (status !== undefined && !['active', 'inactive'].includes(status)) {
+      return res.status(400).json({ error: "Invalid status value. Allowed values are 'active' or 'inactive'." });
+    }
+    if (description !== undefined && typeof description !== 'string') {
+      return res.status(400).json({ error: "'description' must be a string." });
+    }
+
+    if (typeof db.collection !== 'function') { // Check if Firestore is initialized
+        console.error(`[${new Date().toISOString()}] PUT /api/apikeys/${apiKeyToUpdate} - Firestore not initialized for UID ${ownerUid}.`);
+        return res.status(503).json({ error: "Service unavailable: Dependent service not initialized." });
+    }
+
+    const apiKeyRef = db.collection('apiKeys').doc(apiKeyToUpdate);
+    const apiKeyDoc = await apiKeyRef.get();
+
+    if (!apiKeyDoc.exists) {
+      return res.status(404).json({ error: "API key not found." });
+    }
+
+    const apiKeyData = apiKeyDoc.data();
+    if (apiKeyData.ownerUid !== ownerUid) {
+      // Log attempt to modify another user's key for security auditing if desired
+      console.warn(`[${new Date().toISOString()}] Unauthorized attempt by UID ${ownerUid} to update key ${apiKeyToUpdate} owned by ${apiKeyData.ownerUid}`);
+      return res.status(403).json({ error: "Forbidden: You do not own this API key." });
+    }
+
+    // Prevent updating a 'revoked' key's status or description via this endpoint
+    if (apiKeyData.status === 'revoked' && status !== undefined && status !== 'revoked') {
+        return res.status(403).json({ error: "Forbidden: Cannot change status of a revoked API key through this operation." });
+    }
+
+
+    const updateData = {};
+    if (description !== undefined) {
+      updateData.description = description;
+    }
+    if (status !== undefined) {
+      // Only allow changing status to 'active' or 'inactive' here. 'revoked' is handled by DELETE.
+      if (apiKeyData.status !== 'revoked') { // Can't change from revoked to active/inactive here
+          updateData.status = status;
+      } else if (status === 'revoked') {
+          // Allowing to set to 'revoked' again is harmless if it's already revoked.
+          updateData.status = 'revoked';
+      } else {
+          // Attempting to change a revoked key to active/inactive
+           return res.status(403).json({ error: "Forbidden: A revoked API key's status cannot be changed to active or inactive." });
+      }
+    }
+
+    if (Object.keys(updateData).length === 0) {
+        // This might happen if only 'status' was provided and it was 'revoked' for an already revoked key.
+        // Or if no valid fields were provided.
+        return res.status(200).json({ message: "No valid fields to update or key already in desired state.", apiKey: { apiKey: apiKeyDoc.id, ...apiKeyData } });
+    }
+
+    await apiKeyRef.update(updateData);
+
+    const updatedApiKeyDoc = await apiKeyRef.get(); // Fetch the updated document
+    const updatedData = updatedApiKeyDoc.data();
+    const responseData = {
+        apiKey: updatedApiKeyDoc.id,
+        description: updatedData.description,
+        status: updatedData.status,
+        credits: updatedData.credits,
+        usageCount: updatedData.usageCount,
+        createdAt: updatedData.createdAt && updatedData.createdAt.toDate ? updatedData.createdAt.toDate().toISOString() : null,
+        lastUsedAt: updatedData.lastUsedAt && updatedData.lastUsedAt.toDate ? updatedData.lastUsedAt.toDate().toISOString() : null,
+        scopes: updatedData.scopes || [],
+    };
+
+    console.log(`[${new Date().toISOString()}] API Key updated by UID ${ownerUid}: ${apiKeyToUpdate}`);
+    res.status(200).json(responseData);
+
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Error in PUT /api/apikeys/${req.params.apiKey} for UID ${req.user?.uid}:`, error);
+    if (error === uninitializedFirestoreError || error === uninitializedAuthError) {
+        return res.status(503).json({ error: "Service unavailable: Dependent service not initialized." });
+    }
+    res.status(500).json({ error: "Internal Server Error: Could not update API key." });
+  }
+});
+
+
+// --- End API Key Management Endpoints ---
 
 // POST route for /api/qrcode
 app.post('/api/qrcode', authenticateAndManageCredits, async (req, res) => {

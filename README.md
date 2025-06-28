@@ -315,6 +315,89 @@ Once a user is signed up and logged in (typically via a Firebase Client SDK on y
 
 Future phases will add more endpoints that utilize this user authentication (e.g., for users to manage their own API keys).
 
+**3. API Key Management Endpoints:**
+
+All API key management endpoints are protected and require user authentication via a Firebase ID Token in the `Authorization: Bearer <ID_TOKEN>` header.
+
+*   **`POST /api/apikeys` (Create API Key)**
+    *   **Description:** Creates a new API key for the authenticated user.
+    *   **Request Body (JSON, Optional):**
+        ```json
+        {
+          "description": "My new production key"
+        }
+        ```
+    *   **Success Response (201 Created):** The API key string is returned ONCE upon creation. Store it securely.
+        ```json
+        {
+          "message": "API key created successfully. Store this key securely; it will not be shown again.",
+          "apiKey": "generated_api_key_string",
+          "description": "My new production key", // or default description
+          "credits": 1000, // initial credits
+          "status": "active"
+        }
+        ```
+    *   **Error Responses:** 401/403 (Auth), 500 (Server Error), 503 (Service Unavailable).
+
+*   **`GET /api/apikeys` (List API Keys)**
+    *   **Description:** Lists all API keys belonging to the authenticated user.
+    *   **Success Response (200 OK):** Returns an array of API key objects. The full API key string is included as `apiKey` (which is the Firestore Document ID).
+        ```json
+        [
+          {
+            "apiKey": "existing_api_key_string_1",
+            "description": "Key for App A",
+            "status": "active",
+            "credits": 980,
+            "usageCount": 20,
+            "createdAt": "2023-10-01T10:00:00.000Z",
+            "lastUsedAt": "2023-10-28T12:00:00.000Z",
+            "scopes": []
+          },
+          // ... more keys
+        ]
+        ```
+        If no keys are found, an empty array `[]` is returned.
+    *   **Error Responses:** 401/403 (Auth), 500, 503.
+
+*   **`PUT /api/apikeys/:apiKey` (Update API Key)**
+    *   **Description:** Updates the description or status of an API key owned by the authenticated user.
+    *   **URL Parameter:** `:apiKey` - The API key string (document ID) to update.
+    *   **Request Body (JSON):** Provide at least one field.
+        ```json
+        {
+          "description": "Updated key description",
+          "status": "inactive" // or "active"
+        }
+        ```
+    *   **Success Response (200 OK):** Returns the updated API key object.
+        ```json
+        {
+          "apiKey": "updated_api_key_string",
+          "description": "Updated key description",
+          "status": "inactive",
+          // ... other fields
+        }
+        ```
+    *   **Error Responses:**
+        *   `400 Bad Request`: Invalid input (e.g., no fields, invalid status value).
+        *   `401/403 Unauthorized/Forbidden`: Authentication error or user does not own the key.
+        *   `403 Forbidden`: Attempting to change status of a 'revoked' key (except to 'revoked' again).
+        *   `404 Not Found`: API key does not exist.
+        *   `500 Internal Server Error`, `503 Service Unavailable`.
+
+*   **`DELETE /api/apikeys/:apiKey` (Revoke API Key)**
+    *   **Description:** Revokes an API key owned by the authenticated user by setting its status to "revoked". The key document is not deleted from Firestore.
+    *   **URL Parameter:** `:apiKey` - The API key string (document ID) to revoke.
+    *   **Success Response (200 OK):**
+        ```json
+        {
+          "message": "API key revoked successfully."
+        }
+        ```
+        If the key is already revoked, a 200 OK with `{ "message": "API key is already revoked." }` is returned.
+    *   **Error Responses:** 401/403 (Auth/Ownership), 404 (Not Found), 500, 503.
+
 **Configuration File (`public/config.json`):**
 
 Create this file to enable and customize the gate modes. If the file is not found or is invalid, default settings (all modes disabled) will apply.
