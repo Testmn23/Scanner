@@ -4,6 +4,9 @@ import App from './App.vue';
 import CustomMessagePage from './components/gate/CustomMessagePage.vue';
 import MaintenancePage from './components/gate/MaintenancePage.vue';
 import PasswordPromptPage from './components/gate/PasswordPromptPage.vue';
+import PortalLoginPage from './views/portal/PortalLoginPage.vue';
+import PortalSignupPage from './views/portal/PortalSignupPage.vue';
+import PortalDashboardPage from './views/portal/PortalDashboardPage.vue';
 import './index.css';
 import './style.css';
 
@@ -19,82 +22,116 @@ const defaultConfig = {
   customMessage: '<h1>Welcome Default!</h1><p>This page is intentionally blank.</p>',
 };
 
-const appState = reactive({
-  currentView: 'loading', // loading, custom, password, maintenance, app
+// Make appState globally accessible for now for simplified navigation
+// In a larger app, provide/inject or a proper state management (Pinia) would be better.
+const globalAppState = reactive({
+  currentView: 'loading', // loading, custom, password, maintenance, app, portal-login, portal-signup, portal-dashboard
   config: { ...defaultConfig },
-  isAuthenticated: false, // Used to track password success specifically
+  isGateAuthenticated: false, // For the initial password gate
+  // Firebase auth state will be managed separately by a dedicated auth composable/store
 });
+(window as any).globalAppState = globalAppState; // For easy access from placeholder components
 
 const RootComponent = defineComponent({
   setup() {
-    // Initial config load
+    // Initial config load for gate modes
     async function fetchConfigAndInitializeView() {
       try {
         const response = await fetch('/config.json');
         if (response.ok) {
           const loadedConfig = await response.json();
-          appState.config = { ...defaultConfig, ...loadedConfig };
+          globalAppState.config = { ...defaultConfig, ...loadedConfig };
         } else {
           console.warn('config.json not found or failed to load, using default configuration.');
-          appState.config = { ...defaultConfig }; // Ensure it's set
+          globalAppState.config = { ...defaultConfig };
         }
       } catch (error) {
         console.error('Error fetching or parsing config.json, using default configuration:', error);
-        appState.config = { ...defaultConfig }; // Ensure it's set
+        globalAppState.config = { ...defaultConfig };
       }
-      determineInitialView();
+      determineInitialGateView();
     }
 
-    function determineInitialView() {
-      if (appState.config.isCustomMessageModeEnabled) {
-        appState.currentView = 'custom';
-      } else if (appState.config.isPasswordProtectionEnabled && !appState.isAuthenticated) {
-        // Only go to password view if not already authenticated in this session/flow
-        appState.currentView = 'password';
-      } else if (appState.config.isMaintenanceModeEnabled) {
-        appState.currentView = 'maintenance';
+    function determineInitialGateView() {
+      // Check for portal views first based on URL hash, for example
+      // This is a simple way to handle direct navigation for now.
+      // A proper router would handle this more robustly.
+      if (window.location.hash === '#/portal/login') {
+        globalAppState.currentView = 'portal-login';
+        return;
+      } else if (window.location.hash === '#/portal/signup') {
+        globalAppState.currentView = 'portal-signup';
+        return;
+      } else if (window.location.hash === '#/portal/dashboard') {
+        // Later, this will be protected
+        globalAppState.currentView = 'portal-dashboard';
+        return;
+      }
+
+
+      if (globalAppState.config.isCustomMessageModeEnabled) {
+        globalAppState.currentView = 'custom';
+      } else if (globalAppState.config.isPasswordProtectionEnabled && !globalAppState.isGateAuthenticated) {
+        globalAppState.currentView = 'password';
+      } else if (globalAppState.config.isMaintenanceModeEnabled) {
+        globalAppState.currentView = 'maintenance';
       } else {
-        appState.currentView = 'app';
+        // Default to main app if no gate modes are active and no portal hash matches
+        globalAppState.currentView = 'app';
       }
     }
 
     function handlePasswordSuccess(nextViewType: 'app' | 'maintenance') {
-      appState.isAuthenticated = true; // Mark as authenticated
+      globalAppState.isGateAuthenticated = true;
       if (nextViewType === 'maintenance') {
-         // This logic is already in PasswordPromptPage based on its config prop.
-         // PasswordPromptPage emits 'maintenance' or 'app'.
-        appState.currentView = 'maintenance';
+        globalAppState.currentView = 'maintenance';
       } else {
-        appState.currentView = 'app';
+        // After password gate, if no maintenance, show main app by default
+        // Portal navigation will be handled by portal components changing globalAppState.currentView
+        // or by future routing logic.
+        globalAppState.currentView = 'app';
       }
     }
 
     fetchConfigAndInitializeView();
 
+    // Listen to hash changes for simple navigation without a full router
+    window.addEventListener('hashchange', determineInitialGateView);
+    // Ensure onUnmounted cleans up this listener if RootComponent can be unmounted,
+    // but for the root, it's usually not an issue.
+
     return () => {
       let componentToRender;
       let props: Record<string, any> = {};
 
-      switch (appState.currentView) {
+      switch (globalAppState.currentView) {
         case 'custom':
           componentToRender = CustomMessagePage;
-          props = { message: appState.config.customMessage };
+          props = { message: globalAppState.config.customMessage };
           break;
         case 'password':
           componentToRender = PasswordPromptPage;
           props = {
             correctPassword: VITE_APP_PASSWORD,
-            config: appState.config,
-            onAuthComplete: handlePasswordSuccess, // Event name is authComplete
+            config: globalAppState.config,
+            onAuthComplete: handlePasswordSuccess,
           };
           break;
         case 'maintenance':
           componentToRender = MaintenancePage;
-          props = { message: appState.config.maintenanceMessage };
+          props = { message: globalAppState.config.maintenanceMessage };
           break;
         case 'app':
           componentToRender = App;
-          // Props for App.vue if any (currently none)
+          break;
+        case 'portal-login':
+          componentToRender = PortalLoginPage;
+          break;
+        case 'portal-signup':
+          componentToRender = PortalSignupPage;
+          break;
+        case 'portal-dashboard':
+          componentToRender = PortalDashboardPage;
           break;
         default: // loading or error
           componentToRender = { render: () => h('div', { class: 'gate-page-container' }, [h('div',{ class: 'gate-content-wrapper'}, 'Loading...')]) };

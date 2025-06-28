@@ -285,8 +285,32 @@ const isModeToggleDisabled = computed(() => {
       </div>
     </div>
     <AppFooter />
+
+    <!-- Temporary link to API User Portal -->
+    <div class="fixed bottom-4 right-4 z-50">
+      <button
+        @click="goToPortalLogin"
+        class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg"
+      >
+        API User Portal (Dev)
+      </button>
+    </div>
   </main>
 </template>
+
+<script setup lang="ts">
+// ... existing script setup content ...
+
+// Temporary navigation function
+function goToPortalLogin() {
+  if ((window as any).globalAppState) {
+    (window as any).globalAppState.currentView = 'portal-login';
+    window.location.hash = '/portal/login'; // Also update hash for consistency
+  } else {
+    alert("Portal state not available.");
+  }
+}
+</script>
 
 <style lang="postcss" scoped>
 .vertical-border {
