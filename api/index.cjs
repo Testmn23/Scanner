@@ -6,49 +6,53 @@ const path = require('path');
 
 // --- Firebase Admin SDK Initialization ---
 let db;
-// let auth; // Firebase Auth instance - uncomment when needed for user auth
+let auth; // Firebase Auth instance
+
+const uninitializedAuthError = new Error("Firebase Authentication is not initialized.");
+const uninitializedFirestoreError = new Error("Firestore is not initialized.");
+
+const dummyAuth = {
+    createUser: async () => { throw uninitializedAuthError; },
+    verifyIdToken: async () => { throw uninitializedAuthError; },
+    // Add other methods here if you call them before checking for auth initialization elsewhere
+};
+
+const dummyDb = {
+    collection: () => ({
+        doc: () => ({
+            get: async () => { throw uninitializedFirestoreError; },
+            set: async () => { throw uninitializedFirestoreError; },
+            update: async () => { throw uninitializedFirestoreError; }
+        }),
+        where: () => ({
+            get: async () => { throw uninitializedFirestoreError; }
+        })
+    }),
+    runTransaction: async (callback) => { throw uninitializedFirestoreError; }
+};
 
 try {
   if (process.env.FIREBASE_ADMIN_KEY) {
     const serviceAccount = JSON.parse(process.env.FIREBASE_ADMIN_KEY);
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
-      // Optionally, specify databaseURL if needed, though often inferred:
-      // databaseURL: `https://${serviceAccount.project_id}.firebaseio.com`
-    });
+    if (!admin.apps.length) { // Initialize only if not already initialized
+        admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+        // Optionally, specify databaseURL if needed, though often inferred:
+        // databaseURL: `https://${serviceAccount.project_id}.firebaseio.com`
+        });
+    }
     db = admin.firestore();
-    // auth = admin.auth();
+    auth = admin.auth();
     console.log("Firebase Admin SDK initialized successfully using FIREBASE_ADMIN_KEY.");
   } else {
     console.warn("Firebase Admin SDK not initialized: FIREBASE_ADMIN_KEY environment variable not set. Firebase-dependent features will fail.");
-    // Create dummy db/auth objects or handle this state appropriately if partial functionality is desired
-    // For now, db will be undefined, and routes using it will fail.
-    // This could be improved with a more explicit "disabled" mode for Firebase features.
-    db = {
-        collection: () => ({
-            doc: () => ({
-                get: async () => ({ exists: false, data: () => ({}) }),
-                set: async () => {},
-                update: async () => {}
-            }),
-            where: () => ({ get: async () => ({ empty: true, docs: [] }) })
-        }),
-        runTransaction: async (callback) => { throw new Error("Firestore is not initialized."); }
-    }; // Dummy Firestore object
+    db = dummyDb;
+    auth = dummyAuth;
   }
 } catch (error) {
   console.error("Error initializing Firebase Admin SDK with FIREBASE_ADMIN_KEY:", error);
-  db = {
-      collection: () => ({
-          doc: () => ({
-              get: async () => ({ exists: false, data: () => ({}) }),
-              set: async () => {},
-              update: async () => {}
-          }),
-          where: () => ({ get: async () => ({ empty: true, docs: [] }) })
-      }),
-      runTransaction: async (callback) => { throw new Error("Firestore is not initialized due to an error."); }
-  }; // Dummy Firestore object on error
+  db = dummyDb;
+  auth = dummyAuth;
 }
 
 // --- End Firebase Admin SDK Initialization ---
@@ -339,6 +343,132 @@ app.get('/api/qrcode', (req, res) => {
 app.get('/api/scan', (req, res) => {
   console.log(`[${new Date().toISOString()}] GET /api/scan - Route hit`);
   res.status(200).json({ message: "GET request received for /api/scan. API is alive. Please use POST to scan QR codes." });
+});
+
+// --- User Authentication Endpoints ---
+
+// POST /api/auth/signup
+app.post('/api/auth/signup', async (req, res) => {
+  try {
+    const { email, password, displayName } = req.body;
+
+    // Basic input validation
+    if (!email || typeof email !== 'string' || !password || typeof password !== 'string') {
+      return res.status(400).json({ error: 'Email and password are required and must be strings.' });
+    }
+    // Firebase default password length is 6 chars
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
+    }
+    // Basic email format check (not exhaustive)
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return res.status(400).json({ error: 'Invalid email format.' });
+    }
+
+    // Check if auth is initialized
+    if (typeof auth.createUser !== 'function') {
+        console.error(`[${new Date().toISOString()}] POST /api/auth/signup - Firebase Auth not initialized.`);
+        return res.status(503).json({ error: "Authentication service is not available." });
+    }
+
+    const userRecord = await auth.createUser({
+      email: email,
+      password: password,
+      displayName: displayName || undefined, // displayName is optional for Firebase Auth
+    });
+
+    // Optional: Create a user profile in Firestore `users` collection
+    if (typeof db.collection === 'function') {
+      const userProfile = {
+        email: userRecord.email,
+        displayName: userRecord.displayName || null,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        // Add any other default fields for your user profile
+      };
+      await db.collection('users').doc(userRecord.uid).set(userProfile);
+      console.log(`[${new Date().toISOString()}] User profile created in Firestore for UID: ${userRecord.uid}`);
+    }
+
+    console.log(`[${new Date().toISOString()}] User created successfully: ${userRecord.uid} - ${userRecord.email}`);
+    res.status(201).json({
+      message: 'User created successfully.',
+      uid: userRecord.uid,
+      email: userRecord.email,
+    });
+
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Error in /api/auth/signup:`, error);
+    if (error.code === 'auth/email-already-exists') {
+      return res.status(409).json({ error: 'Conflict: Email already exists.' });
+    }
+    if (error.code === 'auth/invalid-email') {
+      return res.status(400).json({ error: 'Bad Request: Invalid email format.' });
+    }
+    if (error.code === 'auth/weak-password') {
+      return res.status(400).json({ error: 'Bad Request: Password is too weak.' });
+    }
+    // Check for uninitialized auth error specifically if it bubbles up somehow
+    if (error === uninitializedAuthError) {
+        return res.status(503).json({ error: "Authentication service is not available." });
+    }
+    return res.status(500).json({ error: 'Internal Server Error: Could not create user.' });
+  }
+});
+
+// --- End User Authentication Endpoints ---
+
+// --- Middleware to verify Firebase ID Token ---
+async function verifyFirebaseIdToken(req, res, next) {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} - Token Verification Failed: Missing or malformed Authorization header.`);
+    return res.status(401).json({ error: 'Unauthorized: No token provided or malformed token.' });
+  }
+
+  const idToken = authHeader.split('Bearer ')[1];
+
+  if (!idToken) {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} - Token Verification Failed: Token string is empty after 'Bearer '.`);
+    return res.status(401).json({ error: 'Unauthorized: Token string is empty.' });
+  }
+
+  // Check if auth is initialized
+  if (typeof auth.verifyIdToken !== 'function') {
+      console.error(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} - Firebase Auth not initialized. Cannot verify ID token.`);
+      return res.status(503).json({ error: "Authentication service is not available." });
+  }
+
+  try {
+    const decodedToken = await auth.verifyIdToken(idToken);
+    req.user = decodedToken; // Attach user info (uid, email, etc.) to request object
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} - ID Token verified successfully for UID: ${decodedToken.uid}`);
+    next();
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} - Error verifying Firebase ID token:`, error);
+    if (error.code === 'auth/id-token-expired') {
+      return res.status(401).json({ error: 'Unauthorized: Token expired.' });
+    }
+    if (error.code === 'auth/argument-error') { // often means malformed token
+        return res.status(401).json({ error: 'Unauthorized: Invalid token format.' });
+    }
+    // Check for uninitialized auth error specifically if it bubbles up somehow
+    if (error === uninitializedAuthError) {
+        return res.status(503).json({ error: "Authentication service is not available." });
+    }
+    return res.status(403).json({ error: 'Forbidden: Invalid or expired token.' });
+  }
+}
+// --- End Firebase ID Token Verification Middleware ---
+
+// Test route protected by ID token verification
+app.get('/api/me', verifyFirebaseIdToken, (req, res) => {
+  // If verifyFirebaseIdToken middleware calls next(), req.user will be populated
+  console.log(`[${new Date().toISOString()}] GET /api/me - Successfully authenticated user: ${req.user.uid}`);
+  res.status(200).json({
+    message: "Successfully authenticated.",
+    user: req.user // Send back the decoded token (contains uid, email, etc.)
+  });
 });
 
 // POST route for /api/qrcode

@@ -263,6 +263,58 @@ Before users can generate keys via a dashboard (a future feature), administrator
 
 This setup enables authenticated and metered access to your API's core functionalities.
 
+### User Authentication (Firebase Auth)
+
+The API supports user signup via Firebase Authentication. Authenticated users (in future phases) will be able to manage their API keys.
+
+**1. Signup Endpoint:**
+
+*   **`POST /api/auth/signup`**
+    *   **Request Body (JSON):**
+        ```json
+        {
+          "email": "user@example.com",
+          "password": "yourSecurePassword123",
+          "displayName": "Optional Display Name"
+        }
+        ```
+    *   **Description:** Creates a new user in Firebase Authentication. Passwords should be at least 6 characters long.
+    *   **Success Response (201 Created):**
+        ```json
+        {
+          "message": "User created successfully.",
+          "uid": "firebaseUserUID",
+          "email": "user@example.com"
+        }
+        ```
+    *   **Error Responses:**
+        *   `400 Bad Request`: Invalid input (e.g., missing fields, invalid email format, weak password).
+        *   `409 Conflict`: Email already exists.
+        *   `500 Internal Server Error`: Other server-side issues.
+        *   `503 Service Unavailable`: Firebase Authentication service not initialized.
+    *   **Optional `users` Collection:** Upon successful signup, a document may be created in a `users` collection in Firestore with the user's `uid` as the document ID, storing `email`, `displayName`, and `createdAt`.
+
+**2. Authenticating API Requests (for Protected Routes):**
+
+Once a user is signed up and logged in (typically via a Firebase Client SDK on your frontend), the client will receive a Firebase ID Token. To access protected API routes that require user authentication (e.g., future routes for managing API keys, or the test `/api/me` route), this ID token must be included in the `Authorization` header.
+
+*   **Header Format:** `Authorization: Bearer <FIREBASE_ID_TOKEN>`
+
+*   **Example Test Route:**
+    *   `GET /api/me`: If the provided ID token is valid, this route will return information about the authenticated user.
+        ```json
+        {
+          "message": "Successfully authenticated.",
+          "user": {
+            "uid": "firebaseUserUID",
+            "email": "user@example.com",
+            // ... other claims from the ID token
+          }
+        }
+        ```
+
+Future phases will add more endpoints that utilize this user authentication (e.g., for users to manage their own API keys).
+
 **Configuration File (`public/config.json`):**
 
 Create this file to enable and customize the gate modes. If the file is not found or is invalid, default settings (all modes disabled) will apply.
