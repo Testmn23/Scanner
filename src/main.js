@@ -31,7 +31,9 @@ const globalAppState = reactive({
   isGateAuthenticated: false, // For the initial password gate
   // Firebase auth state will be managed separately by a dedicated auth composable/store
 });
-(window as any).globalAppState = globalAppState; // For easy access from placeholder components
+// Assign to window in a way that's more JS-friendly for build tools,
+// while still giving TS a hint if this file is processed by TS.
+(window as Window & { globalAppState?: any }).globalAppState = globalAppState; // For easy access from placeholder components
 
 const RootComponent = defineComponent({
   setup() {
